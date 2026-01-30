@@ -10,11 +10,11 @@ This document provides a detailed implementation plan for the metriccost MVP bas
 
 ## Phase 1: Project Setup & Foundation
 
-### 1.1 Go Project Initialization
+### 1.1 Go Project Initialization ✅
 
 **Tasks:**
-- [ ] Initialize Go module: `go mod init github.com/[org]/metriccost`
-- [ ] Set up project directory structure:
+- [x] Initialize Go module: `go mod init github.com/illenko/metriccost`
+- [x] Set up project directory structure:
   ```
   metriccost/
   ├── cmd/
@@ -40,35 +40,34 @@ This document provides a detailed implementation plan for the metriccost MVP bas
   ├── go.sum
   └── Makefile
   ```
-- [ ] Create `Makefile` with common tasks (build, test, run, lint)
-- [ ] Add `.gitignore` for Go and Node.js artifacts
+- [x] Create `Makefile` with common tasks (build, test, run, lint)
+- [x] Add `.gitignore` for Go and Node.js artifacts
 
 **Dependencies to add:**
 ```go
 // go.mod dependencies
-github.com/spf13/cobra          // CLI framework
-github.com/spf13/viper          // Configuration
+github.com/spf13/cobra v1.10.2           // CLI framework
+github.com/spf13/viper v1.21.0           // Configuration
 github.com/prometheus/client_golang/api  // Prometheus client
-modernc.org/sqlite              // Pure Go SQLite (no CGO)
-github.com/go-chi/chi/v5        // HTTP router
-github.com/rs/zerolog           // Structured logging
-gopkg.in/yaml.v3                // YAML parsing
+modernc.org/sqlite v1.44.3               // Pure Go SQLite (no CGO)
+github.com/go-chi/chi/v5 v5.2.4          // HTTP router
+log/slog                                 // Structured logging (stdlib, Go 1.21+)
 ```
 
 **Deliverable:** Compilable Go project with basic structure
 
 ---
 
-### 1.2 Configuration System
+### 1.2 Configuration System ✅
 
 **File:** `internal/config/config.go`
 
 **Tasks:**
-- [ ] Define Config struct matching YAML schema from concept.md
-- [ ] Implement YAML file loading with Viper
-- [ ] Add environment variable overrides (METRICCOST_*)
-- [ ] Implement config validation with sensible defaults
-- [ ] Create example config file
+- [x] Define Config struct matching YAML schema from concept.md
+- [x] Implement YAML file loading with Viper
+- [x] Add environment variable overrides (METRICCOST_*)
+- [x] Implement config validation with sensible defaults
+- [x] Create example config file (via `metriccost init` command)
 
 **Config struct outline:**
 ```go
@@ -87,21 +86,21 @@ type Config struct {
 
 ---
 
-### 1.3 SQLite Database Layer
+### 1.3 SQLite Database Layer ✅
 
 **File:** `internal/storage/sqlite.go`
 
 **Tasks:**
-- [ ] Implement database connection management
-- [ ] Create migration system (embed SQL files)
-- [ ] Implement all tables from concept.md:
+- [x] Implement database connection management
+- [x] Create migration system (embed SQL files)
+- [x] Implement all tables from concept.md:
   - `metric_snapshots`
   - `recommendations`
   - `dashboard_stats`
   - `snapshots` (overall cardinality/size history)
-- [ ] Create repository interfaces for each entity
-- [ ] Implement data retention cleanup (90-day default)
-- [ ] Add database stats command support
+- [x] Create repository interfaces for each entity
+- [x] Implement data retention cleanup (90-day default)
+- [x] Add database stats command support
 
 **Migration files:**
 ```
@@ -307,14 +306,14 @@ const (
 
 ## Phase 5: CLI Interface
 
-### 5.1 CLI Framework
+### 5.1 CLI Framework ✅
 
 **File:** `cmd/metriccost/main.go`
 
 **Tasks:**
-- [ ] Set up Cobra CLI framework
-- [ ] Implement global flags: `--config`, `--verbose`
-- [ ] Add version command
+- [x] Set up Cobra CLI framework
+- [x] Implement global flags: `--config`, `--verbose`
+- [x] Add version command
 
 **Deliverable:** CLI skeleton
 
@@ -667,7 +666,7 @@ Week 7-8: Phase 6, 8-10
 | `chi` | HTTP router | Lightweight, idiomatic, good middleware support |
 | `cobra` | CLI | Industry standard, excellent UX |
 | `viper` | Config | Supports YAML, env vars, defaults |
-| `zerolog` | Logging | Fast, structured, zero allocation |
+| `log/slog` | Logging | Stdlib (Go 1.21+), structured, no external deps |
 | `Vite` | Frontend build | Fast HMR, excellent DX |
 | `React Query` | Data fetching | Caching, refetching, loading states |
 | `Recharts` | Charts | Simple API, React-native, responsive |
@@ -712,11 +711,18 @@ A task is complete when:
 
 ---
 
-## Next Steps
+## Progress
 
-1. Start with Phase 1.1 - Go project initialization
-2. Create the directory structure
-3. Add initial dependencies
-4. Begin implementing configuration system
+### Completed
+- ✅ Phase 1: Project Setup & Foundation
+- ✅ Phase 5.1: CLI Framework (partial - init, version commands)
 
-Run `metriccost init` should be the first working command.
+### Next Steps
+1. **Phase 2: Prometheus Integration** - API client, metrics collection, team attribution
+2. Phase 3: Analysis Engine - Size calculator, recommendations
+3. Phase 4: REST API - Endpoints for frontend
+4. Phase 5.2: CLI Commands - scan, report, serve, export
+
+### Working Commands
+- `metriccost init` - creates config.yaml
+- `metriccost version` - shows version info

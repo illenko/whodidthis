@@ -1,0 +1,41 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+coverage.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App specific
+config.yaml
+*.db
+*.sqlite
+*.sqlite3
+
+# Air (hot reload)
+tmp/
+
+# Node modules (for frontend)
+node_modules/
+web/dist/

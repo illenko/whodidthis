@@ -582,7 +582,7 @@ High Priority Recommendations (3):
 - ❌ Multi-cluster support
 - ❌ Recommendation status tracking (acknowledge/apply/ignore)
 - ❌ Alerting on cost spikes
-- ❌ PostgreSQL/ClickHouse support
+- ❌ PostgreSQL support
 - ❌ User authentication & RBAC
 - ❌ API for automation/CI/CD
 - ❌ Slack/Teams notifications

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/illenko/metriccost/internal/analyzer"
+	"github.com/illenko/metriccost/internal/scheduler"
 	"github.com/illenko/metriccost/internal/storage"
 	"github.com/illenko/metriccost/pkg/models"
 )
@@ -15,6 +16,7 @@ type Handlers struct {
 	dashboardsRepo *storage.DashboardsRepository
 	snapshotsRepo  *storage.SnapshotsRepository
 	trends         *analyzer.TrendsCalculator
+	scheduler      *scheduler.Scheduler
 	db             *storage.DB
 }
 
@@ -24,6 +26,7 @@ type HandlersConfig struct {
 	DashboardsRepo *storage.DashboardsRepository
 	SnapshotsRepo  *storage.SnapshotsRepository
 	Trends         *analyzer.TrendsCalculator
+	Scheduler      *scheduler.Scheduler
 	DB             *storage.DB
 }
 
@@ -34,6 +37,7 @@ func NewHandlers(cfg HandlersConfig) *Handlers {
 		dashboardsRepo: cfg.DashboardsRepo,
 		snapshotsRepo:  cfg.SnapshotsRepo,
 		trends:         cfg.Trends,
+		scheduler:      cfg.Scheduler,
 		db:             cfg.DB,
 	}
 }
@@ -203,6 +207,35 @@ func (h *Handlers) GetUnusedDashboards(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, dashboards)
+}
+
+func (h *Handlers) TriggerScan(w http.ResponseWriter, r *http.Request) {
+	if h.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "scheduler not configured")
+		return
+	}
+
+	err := h.scheduler.TriggerScan(r.Context())
+	if err != nil {
+		if err == scheduler.ErrScanAlreadyRunning {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scan started"})
+}
+
+func (h *Handlers) GetScanStatus(w http.ResponseWriter, r *http.Request) {
+	if h.scheduler == nil {
+		writeError(w, http.StatusServiceUnavailable, "scheduler not configured")
+		return
+	}
+
+	status := h.scheduler.GetStatus()
+	writeJSON(w, http.StatusOK, status)
 }
 
 func parseIntParam(r *http.Request, name string, defaultVal int) int {

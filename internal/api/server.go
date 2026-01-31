@@ -50,6 +50,10 @@ func NewServer(handlers *Handlers, cfg ServerConfig) *Server {
 	// Dashboards
 	mux.HandleFunc("GET /api/dashboards/unused", handlers.GetUnusedDashboards)
 
+	// Scan
+	mux.HandleFunc("POST /api/scan", handlers.TriggerScan)
+	mux.HandleFunc("GET /api/scan/status", handlers.GetScanStatus)
+
 	handler := withMiddleware(mux)
 
 	return &Server{

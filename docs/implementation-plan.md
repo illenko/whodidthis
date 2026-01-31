@@ -536,26 +536,27 @@ func ServeStatic(r chi.Router) {
 
 ---
 
-## Phase 8: Background Scheduler
+## Phase 8: Background Scheduler ✅
 
-### 8.1 Scheduler Implementation
+### 8.1 Scheduler Implementation ✅
 
 **File:** `internal/scheduler/scheduler.go`
 
 **Tasks:**
-- [ ] Implement background job runner
-- [ ] Support configurable collection interval (default: 24h)
-- [ ] Implement graceful shutdown
-- [ ] Add job status tracking
-- [ ] Log collection progress and results
+- [x] Implement background job runner
+- [x] Support configurable collection interval (default: 24h)
+- [x] Implement graceful shutdown
+- [x] Add job status tracking
+- [x] Log collection progress and results
+- [x] Add manual scan trigger via API (`POST /api/scan`)
+- [x] Add scan status endpoint (`GET /api/scan/status`)
 
-**Jobs to schedule:**
+**Jobs scheduled:**
 1. Prometheus metrics collection
 2. Grafana dashboard collection
 3. Recommendations generation
-4. Old data cleanup (>90 days)
 
-**Deliverable:** Working background scheduler
+**Deliverable:** Working background scheduler with HTTP API
 
 ---
 
@@ -719,12 +720,13 @@ A task is complete when:
 - ✅ Phase 6: Grafana Integration
 - ✅ Phase 3: Analysis Engine
 - ✅ Phase 4: REST API (using Go 1.22+ stdlib, no chi)
+- ✅ Phase 8: Background Scheduler (with scan trigger API)
 - ✅ Phase 5.1: CLI Framework (partial - init, version commands)
 
 ### Next Steps
-1. **Phase 5.2: CLI Commands** - scan, report, serve, export
-2. Phase 7: React Frontend
-3. Phase 8: Background Scheduler
+1. **Phase 7: React Frontend** - Web UI for visualization
+2. Phase 10: Docker/Kubernetes deployment
+3. Phase 5.2: CLI Commands (optional - lower priority for K8s deployment)
 
 ### Working Commands
 - `metriccost init` - creates config.yaml

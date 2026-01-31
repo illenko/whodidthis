@@ -17,7 +17,6 @@ type PrometheusCollector struct {
 	metricsRepo *storage.MetricsRepository
 	snapRepo    *storage.SnapshotsRepository
 	teamMatcher *analyzer.TeamMatcher
-	sizeCalc    *analyzer.SizeCalculator
 
 	batchSize           int
 	concurrency         int
@@ -25,9 +24,9 @@ type PrometheusCollector struct {
 }
 
 type CollectorConfig struct {
-	BatchSize           int // save to DB every N metrics to reduce memory usage
+	BatchSize           int
 	Concurrency         int
-	LabelFetchThreshold int // skip fetching labels for metrics with cardinality above this (expensive query)
+	LabelFetchThreshold int
 }
 
 func NewPrometheusCollector(
@@ -35,7 +34,6 @@ func NewPrometheusCollector(
 	metricsRepo *storage.MetricsRepository,
 	snapRepo *storage.SnapshotsRepository,
 	teamMatcher *analyzer.TeamMatcher,
-	sizeCalc *analyzer.SizeCalculator,
 	cfg CollectorConfig,
 ) *PrometheusCollector {
 	if cfg.BatchSize == 0 {
@@ -53,7 +51,6 @@ func NewPrometheusCollector(
 		metricsRepo:         metricsRepo,
 		snapRepo:            snapRepo,
 		teamMatcher:         teamMatcher,
-		sizeCalc:            sizeCalc,
 		batchSize:           cfg.BatchSize,
 		concurrency:         cfg.Concurrency,
 		labelFetchThreshold: cfg.LabelFetchThreshold,
@@ -63,7 +60,6 @@ func NewPrometheusCollector(
 type CollectResult struct {
 	TotalMetrics     int
 	TotalCardinality int64
-	TotalSizeBytes   int64
 	TeamBreakdown    map[string]models.TeamMetrics
 	Duration         time.Duration
 	Errors           []error
@@ -132,7 +128,6 @@ func (c *PrometheusCollector) Collect(ctx context.Context) (*CollectResult, erro
 			batch = append(batch, m)
 			result.TotalMetrics++
 			result.TotalCardinality += int64(m.Cardinality)
-			result.TotalSizeBytes += m.EstimatedSizeBytes
 
 			team := m.Team
 			if team == "" {
@@ -140,7 +135,6 @@ func (c *PrometheusCollector) Collect(ctx context.Context) (*CollectResult, erro
 			}
 			tm := result.TeamBreakdown[team]
 			tm.Cardinality += int64(m.Cardinality)
-			tm.SizeBytes += m.EstimatedSizeBytes
 			tm.MetricCount++
 			result.TeamBreakdown[team] = tm
 
@@ -159,11 +153,18 @@ func (c *PrometheusCollector) Collect(ctx context.Context) (*CollectResult, erro
 		return nil, err
 	}
 
+	// Calculate percentages for team breakdown
+	for team, tm := range result.TeamBreakdown {
+		if result.TotalCardinality > 0 {
+			tm.Percentage = float64(tm.Cardinality) / float64(result.TotalCardinality) * 100
+		}
+		result.TeamBreakdown[team] = tm
+	}
+
 	snapshot := &models.Snapshot{
 		CollectedAt:      collectedAt,
 		TotalMetrics:     result.TotalMetrics,
 		TotalCardinality: result.TotalCardinality,
-		TotalSizeBytes:   result.TotalSizeBytes,
 		TeamBreakdown:    result.TeamBreakdown,
 	}
 
@@ -176,7 +177,6 @@ func (c *PrometheusCollector) Collect(ctx context.Context) (*CollectResult, erro
 	slog.Info("collection complete",
 		"metrics", result.TotalMetrics,
 		"cardinality", result.TotalCardinality,
-		"size", analyzer.FormatBytes(result.TotalSizeBytes),
 		"duration", result.Duration,
 		"errors", len(result.Errors),
 	)
@@ -195,8 +195,6 @@ func (c *PrometheusCollector) collectMetric(ctx context.Context, name string, co
 		team = c.teamMatcher.GetTeam(name)
 	}
 
-	estimatedSize := c.sizeCalc.EstimateSize(cardinality)
-
 	var labels map[string]int
 	if cardinality > 0 && cardinality < c.labelFetchThreshold {
 		labelInfo, err := c.client.GetMetricLabels(ctx, name)
@@ -209,11 +207,10 @@ func (c *PrometheusCollector) collectMetric(ctx context.Context, name string, co
 	}
 
 	return &models.MetricSnapshot{
-		CollectedAt:        collectedAt,
-		MetricName:         name,
-		Cardinality:        cardinality,
-		EstimatedSizeBytes: estimatedSize,
-		Team:               team,
-		Labels:             labels,
+		CollectedAt: collectedAt,
+		MetricName:  name,
+		Cardinality: cardinality,
+		Team:        team,
+		Labels:      labels,
 	}, nil
 }

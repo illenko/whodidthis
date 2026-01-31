@@ -3,7 +3,6 @@ const BASE_URL = '/api'
 export interface Overview {
   total_metrics: number
   total_cardinality: number
-  total_size_bytes: number
   trend_percentage: number
   last_scan: string
   team_breakdown: Record<string, TeamMetrics>
@@ -11,14 +10,14 @@ export interface Overview {
 
 export interface TeamMetrics {
   cardinality: number
-  size_bytes: number
   metric_count: number
+  percentage: number
 }
 
 export interface Metric {
   name: string
   cardinality: number
-  estimated_size_bytes: number
+  percentage: number
   team: string
   trend_percentage: number
 }
@@ -29,8 +28,8 @@ export interface Recommendation {
   type: string
   priority: string
   current_cardinality: number
-  current_size_bytes: number
-  potential_reduction_bytes: number
+  potential_reduction: number
+  reduction_percentage: number
   description: string
   suggested_action: string
 }
@@ -44,14 +43,12 @@ export interface ScanStatus {
   prometheus_metrics: number
   grafana_dashboards: number
   recommendations: number
-  total_size_bytes: number
 }
 
 export interface TrendPoint {
   date: string
   total_metrics: number
   cardinality: number
-  size_bytes: number
 }
 
 async function fetchJSON<T>(url: string): Promise<T> {

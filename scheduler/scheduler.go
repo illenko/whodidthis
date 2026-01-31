@@ -28,10 +28,9 @@ type ScanStatus struct {
 	LastError    string    `json:"last_error,omitempty"`
 	NextScanAt   time.Time `json:"next_scan_at,omitempty"`
 
-	PrometheusMetrics int   `json:"prometheus_metrics,omitempty"`
-	GrafanaDashboards int   `json:"grafana_dashboards,omitempty"`
-	Recommendations   int   `json:"recommendations,omitempty"`
-	TotalSizeBytes    int64 `json:"total_size_bytes,omitempty"`
+	PrometheusMetrics int `json:"prometheus_metrics,omitempty"`
+	GrafanaDashboards int `json:"grafana_dashboards,omitempty"`
+	Recommendations   int `json:"recommendations,omitempty"`
 }
 
 type Config struct {
@@ -141,7 +140,6 @@ func (s *Scheduler) runScan(ctx context.Context) {
 		} else {
 			s.mu.Lock()
 			s.status.PrometheusMetrics = promResult.TotalMetrics
-			s.status.TotalSizeBytes = promResult.TotalSizeBytes
 			s.mu.Unlock()
 		}
 	}

@@ -2,15 +2,12 @@ import { useEffect, useState } from 'react'
 import { api } from './api'
 import type { Overview, Metric, Recommendation, ScanStatus } from './api'
 
-function formatBytes(bytes: number): string {
-  if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB'
-  if (bytes >= 1e6) return (bytes / 1e6).toFixed(2) + ' MB'
-  if (bytes >= 1e3) return (bytes / 1e3).toFixed(2) + ' KB'
-  return bytes + ' B'
-}
-
 function formatNumber(n: number): string {
   return n.toLocaleString()
+}
+
+function formatPercent(n: number): string {
+  return n.toFixed(2) + '%'
 }
 
 type Tab = 'overview' | 'metrics' | 'recommendations'
@@ -73,7 +70,7 @@ function App() {
 
   async function loadMetrics() {
     try {
-      setMetrics(await api.getMetrics({ limit: 50, sort: 'size', search: search || undefined }))
+      setMetrics(await api.getMetrics({ limit: 50, search: search || undefined }))
     } catch (e) {
       console.error(e)
     }
@@ -94,7 +91,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Header */}
       <header className="border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <h1 className="text-xl font-semibold text-gray-900">Metric Cost</h1>
@@ -116,7 +112,6 @@ function App() {
         </div>
       </header>
 
-      {/* Navigation */}
       <nav className="border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-6">
           <div className="flex gap-8">
@@ -137,7 +132,6 @@ function App() {
         </div>
       </nav>
 
-      {/* Content */}
       <main className="max-w-6xl mx-auto px-6 py-8">
         {loading ? (
           <div className="text-gray-500">Loading...</div>
@@ -158,11 +152,9 @@ function OverviewTab({ overview, scanStatus }: { overview: Overview | null; scan
 
   return (
     <div className="space-y-8">
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-6">
+      <div className="grid grid-cols-3 gap-6">
         <StatCard label="Total Metrics" value={formatNumber(overview.total_metrics)} />
         <StatCard label="Total Cardinality" value={formatNumber(overview.total_cardinality)} />
-        <StatCard label="Estimated Size" value={formatBytes(overview.total_size_bytes)} />
         <StatCard
           label="Trend"
           value={`${overview.trend_percentage >= 0 ? '+' : ''}${overview.trend_percentage.toFixed(1)}%`}
@@ -170,14 +162,12 @@ function OverviewTab({ overview, scanStatus }: { overview: Overview | null; scan
         />
       </div>
 
-      {/* Last Scan Info */}
       {scanStatus && scanStatus.last_scan_at && (
         <div className="text-sm text-gray-500">
           Last scan: {new Date(scanStatus.last_scan_at).toLocaleString()} ({scanStatus.last_duration})
         </div>
       )}
 
-      {/* Team Breakdown */}
       {Object.keys(overview.team_breakdown || {}).length > 0 && (
         <div>
           <h2 className="text-lg font-medium text-gray-900 mb-4">By Team</h2>
@@ -188,7 +178,7 @@ function OverviewTab({ overview, scanStatus }: { overview: Overview | null; scan
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Team</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Metrics</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cardinality</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Size</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% of Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -197,7 +187,7 @@ function OverviewTab({ overview, scanStatus }: { overview: Overview | null; scan
                     <td className="px-4 py-3 text-sm text-gray-900">{team}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatNumber(data.metric_count)}</td>
                     <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatNumber(data.cardinality)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatBytes(data.size_bytes)}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatPercent(data.percentage)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -234,7 +224,7 @@ function MetricsTab({
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Metric</th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cardinality</th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Size</th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">% of Total</th>
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Team</th>
             </tr>
           </thead>
@@ -243,7 +233,7 @@ function MetricsTab({
               <tr key={m.name}>
                 <td className="px-4 py-3 text-sm font-mono text-gray-900">{m.name}</td>
                 <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatNumber(m.cardinality)}</td>
-                <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatBytes(m.estimated_size_bytes)}</td>
+                <td className="px-4 py-3 text-sm text-gray-600 text-right">{formatPercent(m.percentage)}</td>
                 <td className="px-4 py-3 text-sm text-gray-500 text-right">{m.team || '-'}</td>
               </tr>
             ))}
@@ -284,8 +274,9 @@ function RecommendationsTab({ recommendations }: { recommendations: Recommendati
               )}
             </div>
             <div className="text-right text-sm">
-              <div className="text-gray-500">Potential savings</div>
-              <div className="font-medium text-green-600">{formatBytes(r.potential_reduction_bytes)}</div>
+              <div className="text-gray-500">Potential reduction</div>
+              <div className="font-medium text-green-600">{formatPercent(r.reduction_percentage)}</div>
+              <div className="text-xs text-gray-400">{formatNumber(r.potential_reduction)} series</div>
             </div>
           </div>
         </div>

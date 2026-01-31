@@ -3,27 +3,26 @@ package models
 import "time"
 
 type MetricSnapshot struct {
-	ID                 int64          `json:"id"`
-	CollectedAt        time.Time      `json:"collected_at"`
-	MetricName         string         `json:"metric_name"`
-	Cardinality        int            `json:"cardinality"`
-	EstimatedSizeBytes int64          `json:"estimated_size_bytes"`
-	SampleCount        int            `json:"sample_count,omitempty"`
-	Team               string         `json:"team,omitempty"`
-	Labels             map[string]int `json:"labels,omitempty"` // label name -> unique values count
+	ID          int64          `json:"id"`
+	CollectedAt time.Time      `json:"collected_at"`
+	MetricName  string         `json:"metric_name"`
+	Cardinality int            `json:"cardinality"`
+	SampleCount int            `json:"sample_count,omitempty"`
+	Team        string         `json:"team,omitempty"`
+	Labels      map[string]int `json:"labels,omitempty"`
 }
 
 type Recommendation struct {
-	ID                      int64     `json:"id"`
-	CreatedAt               time.Time `json:"created_at"`
-	MetricName              string    `json:"metric_name"`
-	Type                    string    `json:"type"`
-	Priority                string    `json:"priority"`
-	CurrentCardinality      int       `json:"current_cardinality,omitempty"`
-	CurrentSizeBytes        int64     `json:"current_size_bytes,omitempty"`
-	PotentialReductionBytes int64     `json:"potential_reduction_bytes,omitempty"`
-	Description             string    `json:"description"`
-	SuggestedAction         string    `json:"suggested_action"`
+	ID                  int64     `json:"id"`
+	CreatedAt           time.Time `json:"created_at"`
+	MetricName          string    `json:"metric_name"`
+	Type                string    `json:"type"`
+	Priority            string    `json:"priority"`
+	CurrentCardinality  int       `json:"current_cardinality,omitempty"`
+	PotentialReduction  int       `json:"potential_reduction,omitempty"`
+	ReductionPercentage float64   `json:"reduction_percentage,omitempty"`
+	Description         string    `json:"description"`
+	SuggestedAction     string    `json:"suggested_action"`
 }
 
 const (
@@ -54,20 +53,18 @@ type Snapshot struct {
 	CollectedAt      time.Time              `json:"collected_at"`
 	TotalMetrics     int                    `json:"total_metrics"`
 	TotalCardinality int64                  `json:"total_cardinality"`
-	TotalSizeBytes   int64                  `json:"total_size_bytes"`
 	TeamBreakdown    map[string]TeamMetrics `json:"team_breakdown,omitempty"`
 }
 
 type TeamMetrics struct {
-	Cardinality int64 `json:"cardinality"`
-	SizeBytes   int64 `json:"size_bytes"`
-	MetricCount int   `json:"metric_count"`
+	Cardinality int64   `json:"cardinality"`
+	MetricCount int     `json:"metric_count"`
+	Percentage  float64 `json:"percentage"`
 }
 
 type Overview struct {
 	TotalMetrics     int                    `json:"total_metrics"`
 	TotalCardinality int64                  `json:"total_cardinality"`
-	TotalSizeBytes   int64                  `json:"total_size_bytes"`
 	TrendPercentage  float64                `json:"trend_percentage"`
 	LastScan         time.Time              `json:"last_scan"`
 	TeamBreakdown    map[string]TeamMetrics `json:"team_breakdown"`
@@ -77,15 +74,14 @@ type TrendDataPoint struct {
 	Date         time.Time `json:"date"`
 	TotalMetrics int       `json:"total_metrics"`
 	Cardinality  int64     `json:"cardinality"`
-	SizeBytes    int64     `json:"size_bytes"`
 }
 
 type MetricListItem struct {
-	Name               string  `json:"name"`
-	Cardinality        int     `json:"cardinality"`
-	EstimatedSizeBytes int64   `json:"estimated_size_bytes"`
-	Team               string  `json:"team"`
-	TrendPercentage    float64 `json:"trend_percentage"`
+	Name            string  `json:"name"`
+	Cardinality     int     `json:"cardinality"`
+	Percentage      float64 `json:"percentage"`
+	Team            string  `json:"team"`
+	TrendPercentage float64 `json:"trend_percentage"`
 }
 
 type UnusedDashboard struct {

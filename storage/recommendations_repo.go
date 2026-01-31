@@ -20,14 +20,14 @@ func (r *RecommendationsRepository) Save(ctx context.Context, rec *models.Recomm
 	query := `
 		INSERT INTO recommendations (
 			created_at, metric_name, type, priority,
-			current_cardinality, current_size_bytes, potential_reduction_bytes,
+			current_cardinality, potential_reduction, reduction_percentage,
 			description, suggested_action
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := r.db.conn.ExecContext(ctx, query,
 		rec.CreatedAt.Format(time.RFC3339), rec.MetricName, rec.Type, rec.Priority,
-		rec.CurrentCardinality, rec.CurrentSizeBytes, rec.PotentialReductionBytes,
+		rec.CurrentCardinality, rec.PotentialReduction, rec.ReductionPercentage,
 		rec.Description, rec.SuggestedAction,
 	)
 	if err != nil {
@@ -52,7 +52,7 @@ func (r *RecommendationsRepository) SaveBatch(ctx context.Context, recs []*model
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO recommendations (
 			created_at, metric_name, type, priority,
-			current_cardinality, current_size_bytes, potential_reduction_bytes,
+			current_cardinality, potential_reduction, reduction_percentage,
 			description, suggested_action
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
@@ -64,7 +64,7 @@ func (r *RecommendationsRepository) SaveBatch(ctx context.Context, recs []*model
 	for _, rec := range recs {
 		_, err = stmt.ExecContext(ctx,
 			rec.CreatedAt.Format(time.RFC3339), rec.MetricName, rec.Type, rec.Priority,
-			rec.CurrentCardinality, rec.CurrentSizeBytes, rec.PotentialReductionBytes,
+			rec.CurrentCardinality, rec.PotentialReduction, rec.ReductionPercentage,
 			rec.Description, rec.SuggestedAction,
 		)
 		if err != nil {
@@ -78,7 +78,7 @@ func (r *RecommendationsRepository) SaveBatch(ctx context.Context, recs []*model
 func (r *RecommendationsRepository) List(ctx context.Context, priority string) ([]*models.Recommendation, error) {
 	query := `
 		SELECT id, created_at, metric_name, type, priority,
-			   current_cardinality, current_size_bytes, potential_reduction_bytes,
+			   current_cardinality, potential_reduction, reduction_percentage,
 			   description, suggested_action
 		FROM recommendations
 	`
@@ -89,7 +89,7 @@ func (r *RecommendationsRepository) List(ctx context.Context, priority string) (
 		args = append(args, priority)
 	}
 
-	query += " ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, potential_reduction_bytes DESC"
+	query += " ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, reduction_percentage DESC"
 
 	rows, err := r.db.conn.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -103,7 +103,7 @@ func (r *RecommendationsRepository) List(ctx context.Context, priority string) (
 func (r *RecommendationsRepository) GetByMetricName(ctx context.Context, metricName string) ([]*models.Recommendation, error) {
 	query := `
 		SELECT id, created_at, metric_name, type, priority,
-			   current_cardinality, current_size_bytes, potential_reduction_bytes,
+			   current_cardinality, potential_reduction, reduction_percentage,
 			   description, suggested_action
 		FROM recommendations
 		WHERE metric_name = ?
@@ -166,12 +166,13 @@ func (r *RecommendationsRepository) scanRecommendations(rows *sql.Rows) ([]*mode
 	for rows.Next() {
 		var rec models.Recommendation
 		var createdAt string
-		var currentCard, currentSize, potentialReduction sql.NullInt64
+		var currentCard, potentialReduction sql.NullInt64
+		var reductionPct sql.NullFloat64
 		var description, suggestedAction sql.NullString
 
 		err := rows.Scan(
 			&rec.ID, &createdAt, &rec.MetricName, &rec.Type, &rec.Priority,
-			&currentCard, &currentSize, &potentialReduction,
+			&currentCard, &potentialReduction, &reductionPct,
 			&description, &suggestedAction,
 		)
 		if err != nil {
@@ -182,11 +183,11 @@ func (r *RecommendationsRepository) scanRecommendations(rows *sql.Rows) ([]*mode
 		if currentCard.Valid {
 			rec.CurrentCardinality = int(currentCard.Int64)
 		}
-		if currentSize.Valid {
-			rec.CurrentSizeBytes = currentSize.Int64
-		}
 		if potentialReduction.Valid {
-			rec.PotentialReductionBytes = potentialReduction.Int64
+			rec.PotentialReduction = int(potentialReduction.Int64)
+		}
+		if reductionPct.Valid {
+			rec.ReductionPercentage = reductionPct.Float64
 		}
 		if description.Valid {
 			rec.Description = description.String

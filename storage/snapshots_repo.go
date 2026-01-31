@@ -25,24 +25,23 @@ func (r *SnapshotsRepository) Save(ctx context.Context, s *models.Snapshot) erro
 	}
 
 	query := `
-		INSERT INTO snapshots (collected_at, total_metrics, total_cardinality, total_size_bytes, team_breakdown)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO snapshots (collected_at, total_metrics, total_cardinality, team_breakdown)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(collected_at) DO UPDATE SET
 			total_metrics = excluded.total_metrics,
 			total_cardinality = excluded.total_cardinality,
-			total_size_bytes = excluded.total_size_bytes,
 			team_breakdown = excluded.team_breakdown
 	`
 
 	_, err = r.db.conn.ExecContext(ctx, query,
-		s.CollectedAt.Format(time.RFC3339), s.TotalMetrics, s.TotalCardinality, s.TotalSizeBytes, string(teamJSON),
+		s.CollectedAt.Format(time.RFC3339), s.TotalMetrics, s.TotalCardinality, string(teamJSON),
 	)
 	return err
 }
 
 func (r *SnapshotsRepository) GetLatest(ctx context.Context) (*models.Snapshot, error) {
 	query := `
-		SELECT id, collected_at, total_metrics, total_cardinality, total_size_bytes, team_breakdown
+		SELECT id, collected_at, total_metrics, total_cardinality, team_breakdown
 		FROM snapshots
 		ORDER BY collected_at DESC
 		LIMIT 1
@@ -53,7 +52,7 @@ func (r *SnapshotsRepository) GetLatest(ctx context.Context) (*models.Snapshot, 
 	var teamJSON sql.NullString
 
 	err := r.db.conn.QueryRowContext(ctx, query).Scan(
-		&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &s.TotalSizeBytes, &teamJSON,
+		&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &teamJSON,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -74,7 +73,7 @@ func (r *SnapshotsRepository) GetLatest(ctx context.Context) (*models.Snapshot, 
 
 func (r *SnapshotsRepository) GetTrends(ctx context.Context, since time.Time) ([]*models.Snapshot, error) {
 	query := `
-		SELECT id, collected_at, total_metrics, total_cardinality, total_size_bytes, team_breakdown
+		SELECT id, collected_at, total_metrics, total_cardinality, team_breakdown
 		FROM snapshots
 		WHERE collected_at >= ?
 		ORDER BY collected_at ASC
@@ -93,7 +92,7 @@ func (r *SnapshotsRepository) GetTrends(ctx context.Context, since time.Time) ([
 		var teamJSON sql.NullString
 
 		err := rows.Scan(
-			&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &s.TotalSizeBytes, &teamJSON,
+			&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &teamJSON,
 		)
 		if err != nil {
 			return nil, err
@@ -114,7 +113,7 @@ func (r *SnapshotsRepository) GetTrends(ctx context.Context, since time.Time) ([
 
 func (r *SnapshotsRepository) GetPrevious(ctx context.Context, before time.Time) (*models.Snapshot, error) {
 	query := `
-		SELECT id, collected_at, total_metrics, total_cardinality, total_size_bytes, team_breakdown
+		SELECT id, collected_at, total_metrics, total_cardinality, team_breakdown
 		FROM snapshots
 		WHERE collected_at < ?
 		ORDER BY collected_at DESC
@@ -126,7 +125,7 @@ func (r *SnapshotsRepository) GetPrevious(ctx context.Context, before time.Time)
 	var teamJSON sql.NullString
 
 	err := r.db.conn.QueryRowContext(ctx, query, before.Format(time.RFC3339)).Scan(
-		&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &s.TotalSizeBytes, &teamJSON,
+		&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &teamJSON,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil

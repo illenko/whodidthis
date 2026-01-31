@@ -18,14 +18,12 @@ import (
 )
 
 func main() {
-	// Setup logging
 	logLevel := slog.LevelInfo
 	if os.Getenv("DEBUG") == "true" {
 		logLevel = slog.LevelDebug
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
-	// Load config
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "config.yaml"
@@ -37,7 +35,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize database
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "metriccost.db"
@@ -50,13 +47,11 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize repositories
 	metricsRepo := storage.NewMetricsRepository(db)
 	snapshotsRepo := storage.NewSnapshotsRepository(db)
 	recsRepo := storage.NewRecommendationsRepository(db)
 	dashboardsRepo := storage.NewDashboardsRepository(db)
 
-	// Initialize Prometheus client
 	promClient, err := prometheus.NewClient(prometheus.Config{
 		URL:      cfg.Prometheus.URL,
 		Username: cfg.Prometheus.Username,
@@ -67,7 +62,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize Grafana client (optional)
 	var grafanaClient *grafana.Client
 	if cfg.Grafana.URL != "" {
 		grafanaClient, err = grafana.NewClient(grafana.Config{
@@ -81,23 +75,14 @@ func main() {
 		}
 	}
 
-	// Initialize team matcher
 	teamPatterns := make(map[string][]string)
 	for team, tc := range cfg.Teams {
 		teamPatterns[team] = tc.MetricsPatterns
 	}
 	teamMatcher, _ := analyzer.NewTeamMatcher(teamPatterns)
 
-	// Initialize size calculator
-	sizeCalc := analyzer.NewSizeCalculator(analyzer.SizeConfig{
-		BytesPerSample: cfg.SizeModel.BytesPerSample,
-		RetentionDays:  cfg.SizeModel.DefaultRetentionDays,
-		ScrapeInterval: cfg.SizeModel.ScrapeInterval,
-	})
-
-	// Initialize collectors
 	promCollector := collector.NewPrometheusCollector(
-		promClient, metricsRepo, snapshotsRepo, teamMatcher, sizeCalc,
+		promClient, metricsRepo, snapshotsRepo, teamMatcher,
 		collector.CollectorConfig{},
 	)
 
@@ -106,24 +91,19 @@ func main() {
 		grafanaCollector = collector.NewGrafanaCollector(grafanaClient, dashboardsRepo, cfg.Grafana.URL)
 	}
 
-	// Initialize recommendations engine
 	recsEngine := analyzer.NewRecommendationsEngine(
-		metricsRepo, dashboardsRepo, recsRepo, sizeCalc,
+		metricsRepo, dashboardsRepo, recsRepo,
 		analyzer.RecommendationsConfig{
 			HighCardinalityThreshold: cfg.Recommendations.HighCardinalityThreshold,
-			MinSizeImpactMB:          cfg.Recommendations.MinSizeImpactMB,
 		},
 	)
 
-	// Initialize trends calculator
 	trends := analyzer.NewTrendsCalculator(snapshotsRepo, metricsRepo)
 
-	// Initialize scheduler
 	sched := scheduler.New(promCollector, grafanaCollector, recsEngine, scheduler.Config{
 		Interval: cfg.Collection.Interval,
 	})
 
-	// Initialize API handlers
 	handlers := api.NewHandlers(api.HandlersConfig{
 		MetricsRepo:    metricsRepo,
 		RecsRepo:       recsRepo,
@@ -134,19 +114,16 @@ func main() {
 		DB:             db,
 	})
 
-	// Initialize server
 	server := api.NewServer(handlers, api.ServerConfig{
 		Host: cfg.Server.Host,
 		Port: cfg.Server.Port,
 	})
 
-	// Start scheduler in background
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go sched.Start(ctx)
 
-	// Handle shutdown
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -157,7 +134,6 @@ func main() {
 		server.Shutdown(context.Background())
 	}()
 
-	// Start server
 	if err := server.Start(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)

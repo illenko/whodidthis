@@ -1,13 +1,12 @@
--- metric_snapshots: daily snapshot per metric (aggregated)
+-- metric_snapshots: daily snapshot per metric
 CREATE TABLE IF NOT EXISTS metric_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collected_at TIMESTAMP NOT NULL,
     metric_name TEXT NOT NULL,
     cardinality INTEGER NOT NULL,
-    estimated_size_bytes INTEGER NOT NULL,
     sample_count INTEGER,
     team TEXT,
-    labels_json TEXT,  -- JSON: {"label": unique_values_count}
+    labels_json TEXT,
     UNIQUE(metric_name, collected_at)
 );
 
@@ -15,16 +14,16 @@ CREATE INDEX IF NOT EXISTS idx_metric_snapshots_date ON metric_snapshots(collect
 CREATE INDEX IF NOT EXISTS idx_metric_snapshots_metric ON metric_snapshots(metric_name);
 CREATE INDEX IF NOT EXISTS idx_metric_snapshots_team ON metric_snapshots(team);
 
--- recommendations: generated optimization recommendations
+-- recommendations: optimization recommendations
 CREATE TABLE IF NOT EXISTS recommendations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TIMESTAMP NOT NULL,
     metric_name TEXT NOT NULL,
-    type TEXT NOT NULL,       -- 'high_cardinality', 'unused', 'redundant_labels'
-    priority TEXT NOT NULL,   -- 'high', 'medium', 'low'
+    type TEXT NOT NULL,
+    priority TEXT NOT NULL,
     current_cardinality INTEGER,
-    current_size_bytes INTEGER,
-    potential_reduction_bytes INTEGER,
+    potential_reduction INTEGER,
+    reduction_percentage REAL,
     description TEXT,
     suggested_action TEXT
 );
@@ -41,21 +40,20 @@ CREATE TABLE IF NOT EXISTS dashboard_stats (
     folder_name TEXT,
     last_viewed_at TIMESTAMP,
     query_count INTEGER,
-    metrics_used TEXT,  -- JSON array of metric names
+    metrics_used TEXT,
     UNIQUE(dashboard_uid, collected_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_dashboard_stats_uid ON dashboard_stats(dashboard_uid);
 CREATE INDEX IF NOT EXISTS idx_dashboard_stats_date ON dashboard_stats(collected_at);
 
--- snapshots: overall system snapshots (totals history)
+-- snapshots: overall system snapshots
 CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collected_at TIMESTAMP NOT NULL UNIQUE,
     total_metrics INTEGER NOT NULL,
     total_cardinality INTEGER NOT NULL,
-    total_size_bytes INTEGER NOT NULL,
-    team_breakdown TEXT  -- JSON: {"team_name": {"cardinality": 1000, "size_bytes": 123456}}
+    team_breakdown TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_date ON snapshots(collected_at);

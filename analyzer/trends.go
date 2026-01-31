@@ -58,7 +58,6 @@ func (t *TrendsCalculator) GetOverallTrends(ctx context.Context, period TrendPer
 			Date:         s.CollectedAt,
 			TotalMetrics: s.TotalMetrics,
 			Cardinality:  s.TotalCardinality,
-			SizeBytes:    s.TotalSizeBytes,
 		})
 	}
 
@@ -84,7 +83,6 @@ func (t *TrendsCalculator) GetOverview(ctx context.Context) (*models.Overview, e
 	return &models.Overview{
 		TotalMetrics:     latest.TotalMetrics,
 		TotalCardinality: latest.TotalCardinality,
-		TotalSizeBytes:   latest.TotalSizeBytes,
 		TrendPercentage:  trend,
 		LastScan:         latest.CollectedAt,
 		TeamBreakdown:    latest.TeamBreakdown,

@@ -25,18 +25,17 @@ func (r *MetricsRepository) Save(ctx context.Context, m *models.MetricSnapshot) 
 	}
 
 	query := `
-		INSERT INTO metric_snapshots (collected_at, metric_name, cardinality, estimated_size_bytes, sample_count, team, labels_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO metric_snapshots (collected_at, metric_name, cardinality, sample_count, team, labels_json)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(metric_name, collected_at) DO UPDATE SET
 			cardinality = excluded.cardinality,
-			estimated_size_bytes = excluded.estimated_size_bytes,
 			sample_count = excluded.sample_count,
 			team = excluded.team,
 			labels_json = excluded.labels_json
 	`
 
 	_, err = r.db.conn.ExecContext(ctx, query,
-		m.CollectedAt.Format(time.RFC3339), m.MetricName, m.Cardinality, m.EstimatedSizeBytes,
+		m.CollectedAt.Format(time.RFC3339), m.MetricName, m.Cardinality,
 		m.SampleCount, m.Team, string(labelsJSON),
 	)
 	return err
@@ -50,11 +49,10 @@ func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.Met
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metric_snapshots (collected_at, metric_name, cardinality, estimated_size_bytes, sample_count, team, labels_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO metric_snapshots (collected_at, metric_name, cardinality, sample_count, team, labels_json)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(metric_name, collected_at) DO UPDATE SET
 			cardinality = excluded.cardinality,
-			estimated_size_bytes = excluded.estimated_size_bytes,
 			sample_count = excluded.sample_count,
 			team = excluded.team,
 			labels_json = excluded.labels_json
@@ -67,7 +65,7 @@ func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.Met
 	for _, m := range metrics {
 		labelsJSON, _ := json.Marshal(m.Labels)
 		_, err = stmt.ExecContext(ctx,
-			m.CollectedAt.Format(time.RFC3339), m.MetricName, m.Cardinality, m.EstimatedSizeBytes,
+			m.CollectedAt.Format(time.RFC3339), m.MetricName, m.Cardinality,
 			m.SampleCount, m.Team, string(labelsJSON),
 		)
 		if err != nil {
@@ -81,14 +79,14 @@ func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.Met
 type ListOptions struct {
 	Limit  int
 	Offset int
-	SortBy string // cardinality, size, name
+	SortBy string
 	Team   string
 	Search string
 }
 
 func (r *MetricsRepository) List(ctx context.Context, collectedAt time.Time, opts ListOptions) ([]*models.MetricSnapshot, error) {
 	query := `
-		SELECT id, collected_at, metric_name, cardinality, estimated_size_bytes, sample_count, team, labels_json
+		SELECT id, collected_at, metric_name, cardinality, sample_count, team, labels_json
 		FROM metric_snapshots
 		WHERE collected_at = ?
 	`
@@ -105,14 +103,10 @@ func (r *MetricsRepository) List(ctx context.Context, collectedAt time.Time, opt
 	}
 
 	switch opts.SortBy {
-	case "cardinality":
-		query += " ORDER BY cardinality DESC"
-	case "size":
-		query += " ORDER BY estimated_size_bytes DESC"
 	case "name":
 		query += " ORDER BY metric_name ASC"
 	default:
-		query += " ORDER BY estimated_size_bytes DESC"
+		query += " ORDER BY cardinality DESC"
 	}
 
 	if opts.Limit > 0 {
@@ -145,9 +139,24 @@ func (r *MetricsRepository) GetLatestCollectionTime(ctx context.Context) (time.T
 	return time.Parse(time.RFC3339, s.String)
 }
 
+func (r *MetricsRepository) GetTotalCardinality(ctx context.Context, collectedAt time.Time) (int64, error) {
+	var total sql.NullInt64
+	err := r.db.conn.QueryRowContext(ctx,
+		"SELECT SUM(cardinality) FROM metric_snapshots WHERE collected_at = ?",
+		collectedAt.Format(time.RFC3339),
+	).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	if !total.Valid {
+		return 0, nil
+	}
+	return total.Int64, nil
+}
+
 func (r *MetricsRepository) GetByName(ctx context.Context, name string) (*models.MetricSnapshot, error) {
 	query := `
-		SELECT id, collected_at, metric_name, cardinality, estimated_size_bytes, sample_count, team, labels_json
+		SELECT id, collected_at, metric_name, cardinality, sample_count, team, labels_json
 		FROM metric_snapshots
 		WHERE metric_name = ?
 		ORDER BY collected_at DESC
@@ -208,7 +217,7 @@ func (r *MetricsRepository) scanMetricFromRows(rows *sql.Rows) (*models.MetricSn
 
 	err := rows.Scan(
 		&m.ID, &collectedAt, &m.MetricName, &m.Cardinality,
-		&m.EstimatedSizeBytes, &sampleCount, &team, &labelsJSON,
+		&sampleCount, &team, &labelsJSON,
 	)
 	if err != nil {
 		return nil, err
@@ -239,7 +248,7 @@ func (r *MetricsRepository) scanMetric(row *sql.Row) (*models.MetricSnapshot, er
 
 	err := row.Scan(
 		&m.ID, &collectedAt, &m.MetricName, &m.Cardinality,
-		&m.EstimatedSizeBytes, &sampleCount, &team, &labelsJSON,
+		&sampleCount, &team, &labelsJSON,
 	)
 	if err != nil {
 		return nil, err

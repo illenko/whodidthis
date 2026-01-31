@@ -102,15 +102,21 @@ func (h *Handlers) ListMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	totalCardinality, _ := h.metricsRepo.GetTotalCardinality(ctx, latestTime)
+
 	var items []models.MetricListItem
 	for _, m := range metrics {
 		trend, _ := h.trends.GetMetricTrend(ctx, m.MetricName)
+		percentage := 0.0
+		if totalCardinality > 0 {
+			percentage = float64(m.Cardinality) / float64(totalCardinality) * 100
+		}
 		items = append(items, models.MetricListItem{
-			Name:               m.MetricName,
-			Cardinality:        m.Cardinality,
-			EstimatedSizeBytes: m.EstimatedSizeBytes,
-			Team:               m.Team,
-			TrendPercentage:    trend,
+			Name:            m.MetricName,
+			Cardinality:     m.Cardinality,
+			Percentage:      percentage,
+			Team:            m.Team,
+			TrendPercentage: trend,
 		})
 	}
 

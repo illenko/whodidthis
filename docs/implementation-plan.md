@@ -113,17 +113,17 @@ migrations/
 
 ---
 
-## Phase 2: Prometheus Integration
+## Phase 2: Prometheus Integration ✅
 
-### 2.1 Prometheus API Client
+### 2.1 Prometheus API Client ✅
 
 **File:** `internal/prometheus/client.go`
 
 **Tasks:**
-- [ ] Implement Prometheus HTTP client with configurable timeout
-- [ ] Add authentication support (basic auth)
-- [ ] Implement connection health check
-- [ ] Add retry logic with exponential backoff (3 retries)
+- [x] Implement Prometheus HTTP client with configurable timeout
+- [x] Add authentication support (basic auth)
+- [x] Implement connection health check
+- [x] Add retry logic with exponential backoff (3 retries)
 
 **API methods needed:**
 ```go
@@ -140,20 +140,20 @@ type Client interface {
 
 ---
 
-### 2.2 Metrics Collection Service
+### 2.2 Metrics Collection Service ✅
 
 **File:** `internal/collector/prometheus_collector.go`
 
 **Tasks:**
-- [ ] Implement full metrics scan:
+- [x] Implement full metrics scan:
   1. Get all metric names
   2. For each metric, get cardinality
   3. Calculate estimated storage size
   4. Apply team attribution via regex patterns
-- [ ] Add progress logging (processing X of Y metrics)
-- [ ] Implement batching to avoid overwhelming Prometheus
-- [ ] Store results in `metric_snapshots` table
-- [ ] Calculate and store snapshot in `snapshots` table
+- [x] Add progress logging (processing X of Y metrics)
+- [x] Implement batching to avoid overwhelming Prometheus
+- [x] Store results in `metric_snapshots` table
+- [x] Calculate and store snapshot in `snapshots` table
 
 **Performance considerations:**
 - Batch metric queries (50 metrics per batch)
@@ -164,15 +164,15 @@ type Client interface {
 
 ---
 
-### 2.3 Team Attribution
+### 2.3 Team Attribution ✅
 
 **File:** `internal/analyzer/team_matcher.go`
 
 **Tasks:**
-- [ ] Implement regex-based team matching
-- [ ] Support multiple patterns per team
-- [ ] Handle "unassigned" metrics (no team match)
-- [ ] Cache compiled regex patterns
+- [x] Implement regex-based team matching
+- [x] Support multiple patterns per team
+- [x] Handle "unassigned" metrics (no team match)
+- [x] Cache compiled regex patterns
 
 **Example:**
 ```go
@@ -343,17 +343,17 @@ const (
 
 ---
 
-## Phase 6: Grafana Integration
+## Phase 6: Grafana Integration ✅
 
-### 6.1 Grafana API Client
+### 6.1 Grafana API Client ✅
 
 **File:** `internal/grafana/client.go`
 
 **Tasks:**
-- [ ] Implement Grafana HTTP client
-- [ ] Add API token authentication
-- [ ] Add basic auth support (optional)
-- [ ] Implement connection health check
+- [x] Implement Grafana HTTP client
+- [x] Add API token authentication
+- [x] Add basic auth support (optional)
+- [x] Implement connection health check
 
 **API methods needed:**
 ```go
@@ -368,19 +368,19 @@ type Client interface {
 
 ---
 
-### 6.2 Dashboard Analysis
+### 6.2 Dashboard Analysis ✅
 
 **File:** `internal/collector/grafana_collector.go`
 
 **Tasks:**
-- [ ] Fetch all dashboards via `/api/search`
-- [ ] For each dashboard:
+- [x] Fetch all dashboards via `/api/search`
+- [x] For each dashboard:
   - Parse panel queries to extract metric names
   - Get `last_viewed_at` from dashboard metadata
   - Count queries per dashboard
-- [ ] Identify unused dashboards (not viewed for >90 days)
-- [ ] Store results in `dashboard_stats` table
-- [ ] Cross-reference metrics used in dashboards with collected metrics
+- [x] Identify unused dashboards (not viewed for >90 days)
+- [x] Store results in `dashboard_stats` table
+- [x] Cross-reference metrics used in dashboards with collected metrics
 
 **Query parsing:**
 - Extract metric names from PromQL queries
@@ -715,13 +715,14 @@ A task is complete when:
 
 ### Completed
 - ✅ Phase 1: Project Setup & Foundation
+- ✅ Phase 2: Prometheus Integration
+- ✅ Phase 6: Grafana Integration
 - ✅ Phase 5.1: CLI Framework (partial - init, version commands)
 
 ### Next Steps
-1. **Phase 2: Prometheus Integration** - API client, metrics collection, team attribution
-2. Phase 3: Analysis Engine - Size calculator, recommendations
-3. Phase 4: REST API - Endpoints for frontend
-4. Phase 5.2: CLI Commands - scan, report, serve, export
+1. **Phase 3: Analysis Engine** - Recommendations (now has Grafana data for unused detection)
+2. Phase 4: REST API - Endpoints for frontend
+3. Phase 5.2: CLI Commands - scan, report, serve, export
 
 ### Working Commands
 - `metriccost init` - creates config.yaml

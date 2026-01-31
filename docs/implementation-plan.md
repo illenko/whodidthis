@@ -192,46 +192,46 @@ func (m *TeamMatcher) GetTeam(metricName string) string {
 
 ---
 
-## Phase 3: Analysis Engine
+## Phase 3: Analysis Engine ✅
 
-### 3.1 Size Calculator
+### 3.1 Size Calculator ✅
 
 **File:** `internal/analyzer/size_calculator.go`
 
 **Tasks:**
-- [ ] Implement storage size estimation:
+- [x] Implement storage size estimation:
   ```
   estimated_size = cardinality × samples_per_day × retention_days × bytes_per_sample
   ```
-- [ ] Support configurable parameters:
+- [x] Support configurable parameters:
   - `bytes_per_sample`: default 2 bytes (Prometheus TSDB average)
   - `retention_days`: default 30
   - `scrape_interval`: default 15s → 5760 samples/day
-- [ ] Calculate per-metric storage size (MB/GB)
-- [ ] Calculate team breakdown totals (by cardinality and size)
-- [ ] Calculate trend (% change from previous scan)
+- [x] Calculate per-metric storage size (MB/GB)
+- [x] Calculate team breakdown totals (by cardinality and size)
+- [x] Calculate trend (% change from previous scan)
 
 **Deliverable:** Accurate size estimations
 
 ---
 
-### 3.2 Recommendations Engine
+### 3.2 Recommendations Engine ✅
 
 **File:** `internal/analyzer/recommendations.go`
 
 **Tasks:**
-- [ ] Implement detection algorithms:
+- [x] Implement detection algorithms:
   1. **High cardinality**: cardinality > 10,000 threshold
   2. **Unused metrics**: not in any Grafana dashboard queries
   3. **High-cardinality labels**: labels with >100 unique values
-- [ ] Implement priority scoring:
+- [x] Implement priority scoring:
   - HIGH: cardinality >10K AND low usage
   - HIGH: metric not used at all
   - MEDIUM: potential for aggregation
   - LOW: optimization suggestions
-- [ ] Calculate potential size reduction per recommendation
-- [ ] Generate actionable descriptions and suggested actions
-- [ ] Filter recommendations by min_size_impact threshold (e.g., >100MB)
+- [x] Calculate potential size reduction per recommendation
+- [x] Generate actionable descriptions and suggested actions
+- [x] Filter recommendations by min_size_impact threshold (e.g., >100MB)
 
 **Recommendation types:**
 ```go
@@ -247,15 +247,15 @@ const (
 
 ---
 
-### 3.3 Trends Calculator
+### 3.3 Trends Calculator ✅
 
 **File:** `internal/analyzer/trends.go`
 
 **Tasks:**
-- [ ] Calculate daily/weekly cardinality and size trends
-- [ ] Calculate per-metric trend (% change)
-- [ ] Support configurable trend periods (7d, 30d, 90d)
-- [ ] Handle missing data points gracefully
+- [x] Calculate daily/weekly cardinality and size trends
+- [x] Calculate per-metric trend (% change)
+- [x] Support configurable trend periods (7d, 30d, 90d)
+- [x] Handle missing data points gracefully
 
 **Deliverable:** Historical trend data
 
@@ -717,12 +717,13 @@ A task is complete when:
 - ✅ Phase 1: Project Setup & Foundation
 - ✅ Phase 2: Prometheus Integration
 - ✅ Phase 6: Grafana Integration
+- ✅ Phase 3: Analysis Engine
 - ✅ Phase 5.1: CLI Framework (partial - init, version commands)
 
 ### Next Steps
-1. **Phase 3: Analysis Engine** - Recommendations (now has Grafana data for unused detection)
-2. Phase 4: REST API - Endpoints for frontend
-3. Phase 5.2: CLI Commands - scan, report, serve, export
+1. **Phase 4: REST API** - Endpoints for frontend
+2. Phase 5.2: CLI Commands - scan, report, serve, export
+3. Phase 7: React Frontend
 
 ### Working Commands
 - `metriccost init` - creates config.yaml

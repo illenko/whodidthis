@@ -1,6 +1,9 @@
 package analyzer
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type SizeCalculator struct {
 	bytesPerSample int
@@ -63,48 +66,12 @@ func FormatBytes(bytes int64) string {
 
 	switch {
 	case bytes >= GB:
-		return formatFloat(float64(bytes)/float64(GB)) + " GB"
+		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(GB))
 	case bytes >= MB:
-		return formatFloat(float64(bytes)/float64(MB)) + " MB"
+		return fmt.Sprintf("%.2f MB", float64(bytes)/float64(MB))
 	case bytes >= KB:
-		return formatFloat(float64(bytes)/float64(KB)) + " KB"
+		return fmt.Sprintf("%.2f KB", float64(bytes)/float64(KB))
 	default:
-		return formatFloat(float64(bytes)) + " B"
+		return fmt.Sprintf("%d B", bytes)
 	}
-}
-
-func formatFloat(f float64) string {
-	if f == float64(int64(f)) {
-		return string(rune(int(f) + '0'))
-	}
-	// Simple formatting without imports
-	intPart := int64(f)
-	fracPart := int64((f - float64(intPart)) * 100)
-	if fracPart == 0 {
-		return intToStr(intPart)
-	}
-	return intToStr(intPart) + "." + intToStr(fracPart)
-}
-
-func intToStr(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-
-	var digits []byte
-	for n > 0 {
-		digits = append([]byte{byte(n%10) + '0'}, digits...)
-		n /= 10
-	}
-
-	if negative {
-		digits = append([]byte{'-'}, digits...)
-	}
-
-	return string(digits)
 }

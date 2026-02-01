@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api'
 import type { Scan, Metric, Label } from '../api'
 import { navigate } from '../lib/router'
@@ -14,21 +14,35 @@ interface LabelsPageProps {
 }
 
 export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps) {
-  const [scan, setScan] = useState<Scan | null>(null)
+  const [scans, setScans] = useState<Scan[]>([])
+  const [selectedScanId, setSelectedScanId] = useState<number>(scanId)
   const [metric, setMetric] = useState<Metric | null>(null)
   const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
 
+  // Load all scans for dropdown
+  useEffect(() => {
+    async function loadScans() {
+      try {
+        const data = await api.getScans()
+        setScans(data || [])
+      } catch (e) {
+        console.error(e)
+      }
+    }
+    loadScans()
+  }, [])
+
+  // Load metric and labels when scan changes
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const [scanData, metricData, labelsData] = await Promise.all([
-          api.getScan(scanId),
-          api.getMetric(scanId, serviceName, metricName),
-          api.getLabels(scanId, serviceName, metricName),
+        const [metricData, labelsData] = await Promise.all([
+          api.getMetric(selectedScanId, serviceName, metricName),
+          api.getLabels(selectedScanId, serviceName, metricName),
         ])
-        setScan(scanData)
         setMetric(metricData)
         setLabels(labelsData || [])
       } catch (e) {
@@ -37,7 +51,21 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
       setLoading(false)
     }
     load()
-  }, [scanId, serviceName, metricName])
+  }, [selectedScanId, serviceName, metricName])
+
+  // Update URL when snapshot changes
+  useEffect(() => {
+    if (selectedScanId !== scanId) {
+      navigate({ page: 'labels', scanId: selectedScanId, serviceName, metricName })
+    }
+  }, [selectedScanId, scanId, serviceName, metricName])
+
+  // Filter labels by search
+  const filteredLabels = useMemo(() => {
+    if (!search) return labels
+    const lower = search.toLowerCase()
+    return labels.filter(l => l.name.toLowerCase().includes(lower))
+  }, [labels, search])
 
   if (loading) return <Loading />
 
@@ -64,20 +92,41 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
     <div className="space-y-6">
       <Breadcrumb
         items={[
-          { label: 'Scans', onClick: () => navigate({ page: 'scans' }) },
-          { label: scan ? formatDate(scan.collected_at) : `Scan #${scanId}`, onClick: () => navigate({ page: 'services', scanId }) },
-          { label: serviceName, onClick: () => navigate({ page: 'metrics', scanId, serviceName }) },
+          { label: 'Services', onClick: () => navigate({ page: 'scans' }) },
+          { label: serviceName, onClick: () => navigate({ page: 'metrics', scanId: selectedScanId, serviceName }) },
           { label: metricName },
         ]}
       />
 
-      <div className="text-sm text-gray-500">
-        {metric ? formatNumber(metric.series_count) : '–'} series &middot; {labels.length} labels
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <select
+            value={selectedScanId}
+            onChange={(e) => setSelectedScanId(Number(e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 bg-white"
+          >
+            {scans.map((scan) => (
+              <option key={scan.id} value={scan.id}>
+                Snapshot #{scan.id} — {formatDate(scan.collected_at)}
+              </option>
+            ))}
+          </select>
+          <span className="text-sm text-gray-500">
+            {metric ? formatNumber(metric.series_count) : '–'} series · {formatNumber(filteredLabels.length)} labels
+          </span>
+        </div>
+        <input
+          type="text"
+          placeholder="Search labels..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 w-64"
+        />
       </div>
 
       <DataTable
         columns={columns}
-        data={labels}
+        data={filteredLabels}
         keyExtractor={(l) => l.id}
       />
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api'
 import type { Scan, Service, Metric } from '../api'
 import { navigate } from '../lib/router'
@@ -13,21 +13,35 @@ interface MetricsPageProps {
 }
 
 export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
-  const [scan, setScan] = useState<Scan | null>(null)
-  const [service, setService] = useState<Service | null>(null)
+  const [scans, setScans] = useState<Scan[]>([])
+  const [selectedScanId, setSelectedScanId] = useState<number>(scanId)
+  const [_, setService] = useState<Service | null>(null)
   const [metrics, setMetrics] = useState<Metric[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
 
+  // Load all scans for dropdown
+  useEffect(() => {
+    async function loadScans() {
+      try {
+        const data = await api.getScans()
+        setScans(data || [])
+      } catch (e) {
+        console.error(e)
+      }
+    }
+    loadScans()
+  }, [])
+
+  // Load service and metrics when scan changes
   useEffect(() => {
     async function load() {
       setLoading(true)
       try {
-        const [scanData, serviceData, metricsData] = await Promise.all([
-          api.getScan(scanId),
-          api.getService(scanId, serviceName),
-          api.getMetrics(scanId, serviceName),
+        const [serviceData, metricsData] = await Promise.all([
+          api.getService(selectedScanId, serviceName),
+          api.getMetrics(selectedScanId, serviceName),
         ])
-        setScan(scanData)
         setService(serviceData)
         setMetrics(metricsData || [])
       } catch (e) {
@@ -36,7 +50,21 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
       setLoading(false)
     }
     load()
-  }, [scanId, serviceName])
+  }, [selectedScanId, serviceName])
+
+  // Update URL when snapshot changes
+  useEffect(() => {
+    if (selectedScanId !== scanId) {
+      navigate({ page: 'metrics', scanId: selectedScanId, serviceName })
+    }
+  }, [selectedScanId, scanId, serviceName])
+
+  // Filter metrics by search
+  const filteredMetrics = useMemo(() => {
+    if (!search) return metrics
+    const lower = search.toLowerCase()
+    return metrics.filter(m => m.name.toLowerCase().includes(lower))
+  }, [metrics, search])
 
   if (loading) return <Loading />
 
@@ -61,26 +89,47 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
   ]
 
   function handleRowClick(m: Metric) {
-    navigate({ page: 'labels', scanId, serviceName, metricName: m.name })
+    navigate({ page: 'labels', scanId: selectedScanId, serviceName, metricName: m.name })
   }
 
   return (
     <div className="space-y-6">
       <Breadcrumb
         items={[
-          { label: 'Scans', onClick: () => navigate({ page: 'scans' }) },
-          { label: scan ? formatDate(scan.collected_at) : `Scan #${scanId}`, onClick: () => navigate({ page: 'services', scanId }) },
+          { label: 'Services', onClick: () => navigate({ page: 'scans' }) },
           { label: serviceName },
         ]}
       />
 
-      <div className="text-sm text-gray-500">
-        {service ? formatNumber(service.total_series) : '–'} series &middot; {metrics.length} metrics
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <select
+            value={selectedScanId}
+            onChange={(e) => setSelectedScanId(Number(e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 bg-white"
+          >
+            {scans.map((scan) => (
+              <option key={scan.id} value={scan.id}>
+                Snapshot #{scan.id} — {formatDate(scan.collected_at)}
+              </option>
+            ))}
+          </select>
+          <span className="text-sm text-gray-500">
+            {formatNumber(filteredMetrics.length)} metrics · {formatNumber(filteredMetrics.reduce((sum, m) => sum + m.series_count, 0))} series
+          </span>
+        </div>
+        <input
+          type="text"
+          placeholder="Search metrics..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 w-64"
+        />
       </div>
 
       <DataTable
         columns={columns}
-        data={metrics}
+        data={filteredMetrics}
         keyExtractor={(m) => m.id}
         onRowClick={handleRowClick}
       />

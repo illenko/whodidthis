@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from '../api'
 import type { Scan, Service } from '../api'
 import { navigate } from '../lib/router'
-import { formatNumber, formatDate } from '../lib/format'
+import { formatNumber } from '../lib/format'
 import { DataTable, type Column } from '../components/DataTable'
 import { Breadcrumb } from '../components/Breadcrumb'
 import { Loading } from '../components/Loading'
@@ -78,8 +78,8 @@ export function ServicesPage({ scanId }: ServicesPageProps) {
     <div className="space-y-6">
       <Breadcrumb
         items={[
-          { label: 'Scans', onClick: () => navigate({ page: 'scans' }) },
-          { label: scan ? formatDate(scan.collected_at) : `Scan #${scanId}` },
+          { label: 'Home', onClick: () => navigate({ page: 'scans' }) },
+          { label: scan ? `Snapshot #${scan.id}` : `Snapshot #${scanId}` },
         ]}
       />
 

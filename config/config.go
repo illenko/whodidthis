@@ -9,12 +9,11 @@ import (
 )
 
 type Config struct {
-	Prometheus      PrometheusConfig      `mapstructure:"prometheus"`
-	Grafana         GrafanaConfig         `mapstructure:"grafana"`
-	Collection      CollectionConfig      `mapstructure:"collection"`
-	Teams           map[string]TeamConfig `mapstructure:"teams"`
-	Recommendations RecommendationsConfig `mapstructure:"recommendations"`
-	Server          ServerConfig          `mapstructure:"server"`
+	Prometheus PrometheusConfig `mapstructure:"prometheus"`
+	Discovery  DiscoveryConfig  `mapstructure:"discovery"`
+	Scan       ScanConfig       `mapstructure:"scan"`
+	Storage    StorageConfig    `mapstructure:"storage"`
+	Server     ServerConfig     `mapstructure:"server"`
 }
 
 type PrometheusConfig struct {
@@ -23,26 +22,18 @@ type PrometheusConfig struct {
 	Password string `mapstructure:"password"`
 }
 
-type GrafanaConfig struct {
-	URL      string `mapstructure:"url"`
-	APIToken string `mapstructure:"api_token"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
+type DiscoveryConfig struct {
+	ServiceLabel string `mapstructure:"service_label"` // e.g., "app", "service", "job"
 }
 
-type CollectionConfig struct {
-	Interval      time.Duration `mapstructure:"interval"`
-	RetentionDays int           `mapstructure:"retention_days"`
+type ScanConfig struct {
+	Interval          time.Duration `mapstructure:"interval"`
+	SampleValuesLimit int           `mapstructure:"sample_values_limit"`
 }
 
-type TeamConfig struct {
-	MetricsPatterns []string `mapstructure:"metrics_patterns"`
-}
-
-type RecommendationsConfig struct {
-	HighCardinalityThreshold int `mapstructure:"high_cardinality_threshold"`
-	UnusedDaysThreshold      int `mapstructure:"unused_days_threshold"`
-	MinCardinalityImpact     int `mapstructure:"min_cardinality_impact"`
+type StorageConfig struct {
+	Path          string `mapstructure:"path"`
+	RetentionDays int    `mapstructure:"retention_days"`
 }
 
 type ServerConfig struct {
@@ -86,12 +77,11 @@ func Load(path string) (*Config, error) {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("prometheus.url", "http://localhost:9090")
-	v.SetDefault("grafana.url", "http://localhost:3000")
-	v.SetDefault("collection.interval", "24h")
-	v.SetDefault("collection.retention_days", 90)
-	v.SetDefault("recommendations.high_cardinality_threshold", 10000)
-	v.SetDefault("recommendations.unused_days_threshold", 30)
-	v.SetDefault("recommendations.min_cardinality_impact", 1000)
+	v.SetDefault("discovery.service_label", "app")
+	v.SetDefault("scan.interval", "24h")
+	v.SetDefault("scan.sample_values_limit", 10)
+	v.SetDefault("storage.path", "./data/metrics-audit.db")
+	v.SetDefault("storage.retention_days", 90)
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.host", "0.0.0.0")
 }
@@ -101,18 +91,16 @@ func defaultConfig() *Config {
 		Prometheus: PrometheusConfig{
 			URL: "http://localhost:9090",
 		},
-		Grafana: GrafanaConfig{
-			URL: "http://localhost:3000",
+		Discovery: DiscoveryConfig{
+			ServiceLabel: "app",
 		},
-		Collection: CollectionConfig{
-			Interval:      24 * time.Hour,
+		Scan: ScanConfig{
+			Interval:          24 * time.Hour,
+			SampleValuesLimit: 10,
+		},
+		Storage: StorageConfig{
+			Path:          "./data/metrics-audit.db",
 			RetentionDays: 90,
-		},
-		Teams: make(map[string]TeamConfig),
-		Recommendations: RecommendationsConfig{
-			HighCardinalityThreshold: 10000,
-			UnusedDaysThreshold:      30,
-			MinCardinalityImpact:     1000,
 		},
 		Server: ServerConfig{
 			Port: 8080,
@@ -125,6 +113,9 @@ func (c *Config) Validate() error {
 	if c.Prometheus.URL == "" {
 		return fmt.Errorf("prometheus.url is required")
 	}
+	if c.Discovery.ServiceLabel == "" {
+		return fmt.Errorf("discovery.service_label is required")
+	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535")
 	}
@@ -132,7 +123,7 @@ func (c *Config) Validate() error {
 }
 
 func (c *Config) RetentionDuration() time.Duration {
-	return time.Duration(c.Collection.RetentionDays) * 24 * time.Hour
+	return time.Duration(c.Storage.RetentionDays) * 24 * time.Hour
 }
 
 func ConfigFileExists(path string) bool {

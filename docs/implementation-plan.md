@@ -25,7 +25,7 @@ This plan implements the **pivot** from a metric-centric audit tool to a **servi
 | 1.1 | ✅ Done | Database migration |
 | 1.2 | ✅ Done | Storage layer (repos) |
 | 2.1 | ✅ Done | Data models |
-| 3.1 | ⬜ Todo | Configuration update |
+| 3.1 | ✅ Done | Configuration update |
 | 4.1 | ⬜ Todo | Prometheus client |
 | 5.1 | ⬜ Todo | Collector rewrite |
 | 5.2 | ⬜ Todo | Remove unused code |
@@ -82,36 +82,17 @@ This plan implements the **pivot** from a metric-centric audit tool to a **servi
 
 ---
 
-## Phase 3: Configuration
+## Phase 3: Configuration ✅
 
-### 3.1 Simplify Configuration
+### 3.1 Simplify Configuration ✅
 
 **File:** `config/config.go`
 
-**Tasks:**
-- [ ] Remove: `Teams`, `Grafana`, `Recommendations` configs
-- [ ] Add: `Discovery.ServiceLabel` (e.g., "app")
-- [ ] Add: `Scan` config (concurrency, delay, sample limit)
-- [ ] Update defaults
-
-**Target config structure:**
-```yaml
-prometheus:
-  url: http://localhost:9090
-
-discovery:
-  service_label: app
-
-scan:
-  sample_values_limit: 10
-
-storage:
-  path: ./data/metrics-audit.db
-  retention_days: 90
-
-server:
-  port: 8080
-```
+- [x] Removed: `Teams`, `Grafana`, `Recommendations` configs
+- [x] Added: `Discovery.ServiceLabel`
+- [x] Added: `Scan.SampleValuesLimit`
+- [x] Added: `Storage` config
+- [x] Updated `config.yaml`
 
 ---
 

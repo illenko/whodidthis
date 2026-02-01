@@ -1,76 +1,107 @@
 const BASE_URL = '/api'
 
-export interface Overview {
-  total_metrics: number
-  total_cardinality: number
-  trend_percentage: number
-  last_scan: string
-  team_breakdown: Record<string, TeamMetrics>
+// Core types matching backend models
+export interface Scan {
+  id: number
+  collected_at: string
+  total_services: number
+  total_series: number
+  duration_ms: number
 }
 
-export interface TeamMetrics {
-  cardinality: number
+export interface Service {
+  id: number
+  snapshot_id: number
+  name: string
+  total_series: number
   metric_count: number
-  percentage: number
 }
 
 export interface Metric {
+  id: number
+  service_snapshot_id: number
   name: string
-  cardinality: number
-  percentage: number
-  team: string
-  trend_percentage: number
+  series_count: number
+  label_count: number
 }
 
-export interface Recommendation {
+export interface Label {
   id: number
-  metric_name: string
-  type: string
-  priority: string
-  current_cardinality: number
-  potential_reduction: number
-  reduction_percentage: number
-  description: string
-  suggested_action: string
+  metric_snapshot_id: number
+  name: string
+  unique_values: number
+  sample_values: string[]
 }
 
 export interface ScanStatus {
   running: boolean
+  progress: string
   last_scan_at: string
   last_duration: string
   last_error: string
   next_scan_at: string
-  prometheus_metrics: number
-  grafana_dashboards: number
-  recommendations: number
+  total_services: number
+  total_series: number
 }
 
-export interface TrendPoint {
-  date: string
-  total_metrics: number
-  cardinality: number
+export interface HealthStatus {
+  status: string
+  database_ok: boolean
+  last_scan: string
 }
 
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  if (!res.ok) {
+    if (res.status === 404) return null as T
+    throw new Error(`HTTP ${res.status}`)
+  }
   return res.json()
 }
 
 export const api = {
-  getOverview: () => fetchJSON<Overview>(`${BASE_URL}/overview`),
-  getMetrics: (params?: { limit?: number; sort?: string; search?: string }) => {
-    const query = new URLSearchParams()
-    if (params?.limit) query.set('limit', String(params.limit))
-    if (params?.sort) query.set('sort', params.sort)
-    if (params?.search) query.set('search', params.search)
-    return fetchJSON<Metric[]>(`${BASE_URL}/metrics?${query}`)
-  },
-  getRecommendations: (priority?: string) => {
-    const query = priority ? `?priority=${priority}` : ''
-    return fetchJSON<Recommendation[]>(`${BASE_URL}/recommendations${query}`)
-  },
-  getTrends: (period = '30d') => fetchJSON<TrendPoint[]>(`${BASE_URL}/trends?period=${period}`),
+  // Health
+  getHealth: () => fetchJSON<HealthStatus>(`${BASE_URL}/../health`),
+
+  // Scan control
   getScanStatus: () => fetchJSON<ScanStatus>(`${BASE_URL}/scan/status`),
   triggerScan: () => fetch(`${BASE_URL}/scan`, { method: 'POST' }),
+
+  // Scans (snapshots)
+  getScans: (limit = 100) => fetchJSON<Scan[]>(`${BASE_URL}/scans?limit=${limit}`),
+  getLatestScan: () => fetchJSON<Scan | null>(`${BASE_URL}/scans/latest`),
+  getScan: (id: number) => fetchJSON<Scan>(`${BASE_URL}/scans/${id}`),
+
+  // Services (within a scan)
+  getServices: (scanId: number, params?: { sort?: string; order?: string; search?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.sort) query.set('sort', params.sort)
+    if (params?.order) query.set('order', params.order)
+    if (params?.search) query.set('search', params.search)
+    const qs = query.toString()
+    return fetchJSON<Service[]>(`${BASE_URL}/scans/${scanId}/services${qs ? '?' + qs : ''}`)
+  },
+  getService: (scanId: number, serviceName: string) =>
+    fetchJSON<Service>(`${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}`),
+
+  // Metrics (within a service)
+  getMetrics: (scanId: number, serviceName: string, params?: { sort?: string; order?: string }) => {
+    const query = new URLSearchParams()
+    if (params?.sort) query.set('sort', params.sort)
+    if (params?.order) query.set('order', params.order)
+    const qs = query.toString()
+    return fetchJSON<Metric[]>(
+      `${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics${qs ? '?' + qs : ''}`
+    )
+  },
+  getMetric: (scanId: number, serviceName: string, metricName: string) =>
+    fetchJSON<Metric>(
+      `${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}`
+    ),
+
+  // Labels (within a metric)
+  getLabels: (scanId: number, serviceName: string, metricName: string) =>
+    fetchJSON<Label[]>(
+      `${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}/labels`
+    ),
 }

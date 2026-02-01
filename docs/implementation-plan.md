@@ -32,12 +32,12 @@ This plan implements the **pivot** from a metric-centric audit tool to a **servi
 | 6.1 | ✅ Done | API endpoints (snapshot-centric) |
 | 6.2 | ✅ Done | Update router |
 | 6.3 | ✅ Done | Update main.go |
-| 7.1 | ⬜ Todo | Frontend types |
-| 7.2 | ⬜ Todo | Scans list page (home) |
-| 7.3 | ⬜ Todo | Services list page |
-| 7.4 | ⬜ Todo | Metrics list page |
-| 7.5 | ⬜ Todo | Labels list page |
-| 8.1 | ⬜ Todo | Final cleanup |
+| 7.1 | ✅ Done | Frontend types |
+| 7.2 | ✅ Done | Scans list page (home) |
+| 7.3 | ✅ Done | Services list page |
+| 7.4 | ✅ Done | Metrics list page |
+| 7.5 | ✅ Done | Labels list page |
+| 8.1 | ⬜ Todo | Final cleanup & test |
 
 ---
 
@@ -194,9 +194,9 @@ Frontend can use this to auto-navigate to latest scan on load.
 
 ---
 
-## Phase 7: Frontend
+## Phase 7: Frontend ✅
 
-### 7.1 TypeScript Types
+### 7.1 TypeScript Types ✅
 
 **File:** `web/src/api.ts`
 
@@ -342,9 +342,9 @@ User can go back to scans list to see history and compare.
 - `grafana/` directory
 - `collector/grafana_collector.go`
 
-### To Do (Frontend)
-- `web/src/api.ts` - update types
-- `web/src/App.tsx` - rewrite UI
+### Frontend ✅
+- `web/src/api.ts` - types updated
+- `web/src/App.tsx` - multi-page UI with hash routing
 
 ---
 

@@ -1,734 +1,387 @@
-# Observability Cost Optimizer - Implementation Plan
+# Service-Level Metrics Audit Tool - Implementation Plan v2
 
-## Document Overview
+## Overview
 
-This document provides a detailed implementation plan for the metriccost MVP based on the requirements defined in `concept.md`.
+This plan implements the **pivot** from a metric-centric audit tool to a **service-centric audit tool** as defined in `concept.md`. The new architecture discovers services via Prometheus labels and provides drill-down visibility: **Services → Metrics → Labels**.
 
-> **Note:** This implementation focuses on **counts and storage size** (cardinality, MB/GB, sample counts) rather than USD cost estimates. Actual costs vary widely due to CUDs, discounts, and pricing models - users can apply their own cost calculations externally if needed.
+### MVP Simplifications
+
+> **Decision:** Skip trends/deltas for MVP. Only show current snapshot data.
+> Trends require 2+ scans and add significant complexity. Can be added later.
+
+| Aspect | Before (v1) | After (v2 MVP) |
+|--------|-------------|----------------|
+| Top-level grouping | Metrics globally | Services discovered via label |
+| Team attribution | Regex patterns | Service label (e.g., `app`, `job`) |
+| Hierarchy | Metric → Labels | Service → Metrics → Labels → Samples |
+| Trends/Deltas | N/A | **Skipped for MVP** |
 
 ---
 
-## Phase 1: Project Setup & Foundation
+## Progress Summary
 
-### 1.1 Go Project Initialization ✅
+| Phase | Status | Description |
+|-------|--------|-------------|
+| 1.1 | ✅ Done | Database migration |
+| 1.2 | ✅ Done | Storage layer (repos) |
+| 2.1 | ✅ Done | Data models |
+| 3.1 | ⬜ Todo | Configuration update |
+| 4.1 | ⬜ Todo | Prometheus client |
+| 5.1 | ⬜ Todo | Collector rewrite |
+| 5.2 | ⬜ Todo | Remove unused code |
+| 6.1 | ⬜ Todo | API endpoints (snapshot-centric) |
+| 6.2 | ⬜ Todo | Update router |
+| 7.1 | ⬜ Todo | Frontend types |
+| 7.2 | ⬜ Todo | Scans list page (home) |
+| 7.3 | ⬜ Todo | Services list page |
+| 7.4 | ⬜ Todo | Metrics list page |
+| 7.5 | ⬜ Todo | Labels list page |
+| 8.1 | ⬜ Todo | Final cleanup |
 
-**Tasks:**
-- [x] Initialize Go module: `go mod init github.com/illenko/metriccost`
-- [x] Set up project directory structure:
-  ```
-  metriccost/
-  ├── cmd/
-  │   └── metriccost/
-  │       └── main.go           # CLI entry point
-  ├── internal/
-  │   ├── config/               # Configuration parsing
-  │   ├── prometheus/           # Prometheus API client
-  │   ├── grafana/              # Grafana API client
-  │   ├── storage/              # SQLite operations
-  │   ├── collector/            # Data collection orchestration
-  │   ├── analyzer/             # Size calculation & recommendations
-  │   ├── api/                  # REST API handlers
-  │   └── scheduler/            # Background job scheduler
-  ├── pkg/
-  │   └── models/               # Shared data models
-  ├── web/                      # React frontend (added later)
-  ├── configs/
-  │   └── config.example.yaml   # Example configuration
-  ├── migrations/               # SQLite schema migrations
-  ├── docs/                     # Documentation
-  ├── go.mod
-  ├── go.sum
-  └── Makefile
-  ```
-- [x] Create `Makefile` with common tasks (build, test, run, lint)
-- [x] Add `.gitignore` for Go and Node.js artifacts
+---
 
-**Dependencies to add:**
+## Phase 1: Database Schema ✅
+
+### 1.1 Database Migration ✅
+
+**File:** `storage/migrations/001_initial_schema.sql` (rewritten)
+
+- [x] Snapshots table (one per scan)
+- [x] Service snapshots table (FK → snapshots)
+- [x] Metric snapshots table (FK → service_snapshots)
+- [x] Label snapshots table (FK → metric_snapshots)
+- [x] All indexes
+
+### 1.2 Storage Layer ✅
+
+- [x] `storage/sqlite.go` - Updated Stats/Cleanup
+- [x] `storage/snapshots_repo.go` - Rewritten
+- [x] `storage/services_repo.go` - Created
+- [x] `storage/metrics_repo.go` - Rewritten
+- [x] `storage/labels_repo.go` - Created
+- [x] Removed: `recommendations_repo.go`, `dashboards_repo.go`
+
+---
+
+## Phase 2: Models ✅
+
+### 2.1 Data Models ✅
+
+**File:** `models/models.go` (rewritten)
+
 ```go
-// go.mod dependencies
-github.com/spf13/cobra v1.10.2           // CLI framework
-github.com/spf13/viper v1.21.0           // Configuration
-github.com/prometheus/client_golang/api  // Prometheus client
-modernc.org/sqlite v1.44.3               // Pure Go SQLite (no CGO)
-github.com/go-chi/chi/v5 v5.2.4          // HTTP router
-log/slog                                 // Structured logging (stdlib, Go 1.21+)
+// Current models (no deltas/trends for MVP):
+- Snapshot           // scan metadata
+- ServiceSnapshot    // service in a scan
+- MetricSnapshot     // metric in a service
+- LabelSnapshot      // label in a metric (with sample values)
+- Overview           // API response
+- ScanStatus         // scan state
+- HealthStatus       // health check
 ```
 
-**Deliverable:** Compilable Go project with basic structure
+---
+
+## Phase 3: Configuration
+
+### 3.1 Simplify Configuration
+
+**File:** `config/config.go`
+
+**Tasks:**
+- [ ] Remove: `Teams`, `Grafana`, `Recommendations` configs
+- [ ] Add: `Discovery.ServiceLabel` (e.g., "app")
+- [ ] Add: `Scan` config (concurrency, delay, sample limit)
+- [ ] Update defaults
+
+**Target config structure:**
+```yaml
+prometheus:
+  url: http://localhost:9090
+
+discovery:
+  service_label: app
+
+scan:
+  sample_values_limit: 10
+
+storage:
+  path: ./data/metrics-audit.db
+  retention_days: 90
+
+server:
+  port: 8080
+```
 
 ---
 
-### 1.2 Configuration System ✅
+## Phase 4: Prometheus Client
 
-**File:** `internal/config/config.go`
+### 4.1 Add Service Discovery Queries
+
+**File:** `prometheus/client.go`
 
 **Tasks:**
-- [x] Define Config struct matching YAML schema from concept.md
-- [x] Implement YAML file loading with Viper
-- [x] Add environment variable overrides (METRICCOST_*)
-- [x] Implement config validation with sensible defaults
-- [x] Create example config file (via `metriccost init` command)
+- [ ] `DiscoverServices(serviceLabel)` → list services with series count
+- [ ] `GetMetricsForService(serviceLabel, serviceName)` → metrics with series count
+- [ ] `GetLabelsForMetric(...)` → labels with unique value counts
+- [ ] `GetLabelSampleValues(...)` → top N sample values
 
-**Config struct outline:**
-```go
-type Config struct {
-    Prometheus      PrometheusConfig
-    Grafana         GrafanaConfig
-    Collection      CollectionConfig
-    SizeModel       SizeModelConfig
-    Teams           map[string]TeamConfig
-    Recommendations RecommendationsConfig
-    Server          ServerConfig
+**Key queries:**
+```promql
+# Discover services
+count({app!=""}) by (app)
+
+# Metrics for service
+count({app="payment-gateway"}) by (__name__)
+
+# Labels for metric (need to use series API)
+```
+
+---
+
+## Phase 5: Collector
+
+### 5.1 Service-Centric Collection
+
+**File:** `collector/prometheus_collector.go` (rewrite)
+
+**Collection flow:**
+1. Discover services via label
+2. For each service: get metrics with counts
+3. For each metric: get labels with counts + samples
+4. Store full hierarchy in one transaction
+
+**Tasks:**
+- [ ] Implement new collection flow
+- [ ] Add progress callback for status API
+- [ ] Rate limiting (configurable concurrency)
+
+### 5.2 Remove Unused Code
+
+- [ ] Remove `collector/grafana_collector.go`
+- [ ] Remove `analyzer/` directory
+- [ ] Remove `grafana/` directory
+
+---
+
+## Phase 6: API
+
+### 6.1 New Endpoints (Snapshot-Centric)
+
+**File:** `api/handlers.go`
+
+All data is accessed through a specific snapshot, enabling historical comparison.
+
+```
+GET  /health                                              → health check
+POST /api/scan                                            → trigger scan
+GET  /api/scan/status                                     → scan status
+
+GET  /api/scans                                           → list all snapshots
+GET  /api/scans/latest                                    → redirect to latest scan
+GET  /api/scans/{id}                                      → snapshot details
+GET  /api/scans/{id}/services                             → services in snapshot
+GET  /api/scans/{id}/services/{service}                   → service detail
+GET  /api/scans/{id}/services/{service}/metrics           → metrics in service
+GET  /api/scans/{id}/services/{service}/metrics/{metric}  → metric detail
+GET  /api/scans/{id}/services/{service}/metrics/{metric}/labels → labels
+```
+
+**Default behavior:** `/api/scans/latest` returns latest scan info (or 404 if no scans).
+Frontend can use this to auto-navigate to latest scan on load.
+
+**Response examples:**
+```json
+// GET /api/scans
+[
+  {"id": 3, "collected_at": "2024-01-15T02:00:00Z", "total_services": 127, "total_series": 2400000},
+  {"id": 2, "collected_at": "2024-01-14T02:00:00Z", "total_services": 125, "total_series": 2350000},
+  {"id": 1, "collected_at": "2024-01-13T02:00:00Z", "total_services": 124, "total_series": 2300000}
+]
+
+// GET /api/scans/3/services
+[{"name": "payment-gateway", "total_series": 245231, "metric_count": 89}]
+
+// GET /api/scans/3/services/payment-gateway/metrics
+[{"name": "http_requests_total", "series_count": 38992, "label_count": 6}]
+
+// GET /api/scans/3/services/payment-gateway/metrics/http_requests_total/labels
+[{"name": "endpoint", "unique_values": 1234, "sample_values": ["/api/v1/pay", ...]}]
+```
+
+**Use case:** After fixing high-cardinality issue, run new scan and compare with previous.
+
+### 6.2 Update Router
+
+**File:** `api/server.go`
+
+- [ ] Register new hierarchical routes
+- [ ] Remove old endpoints
+
+---
+
+## Phase 7: Frontend
+
+### 7.1 TypeScript Types
+
+**File:** `web/src/api.ts`
+
+```typescript
+interface Scan {
+  id: number;
+  collected_at: string;
+  total_services: number;
+  total_series: number;
+  duration_ms?: number;
+}
+
+interface Service {
+  name: string;
+  total_series: number;
+  metric_count: number;
+}
+
+interface Metric {
+  name: string;
+  series_count: number;
+  label_count: number;
+}
+
+interface Label {
+  name: string;
+  unique_values: number;
+  sample_values: string[];
 }
 ```
 
-**Deliverable:** Working configuration loading with defaults
-
----
-
-### 1.3 SQLite Database Layer ✅
-
-**File:** `internal/storage/sqlite.go`
-
-**Tasks:**
-- [x] Implement database connection management
-- [x] Create migration system (embed SQL files)
-- [x] Implement all tables from concept.md:
-  - `metric_snapshots`
-  - `recommendations`
-  - `dashboard_stats`
-  - `snapshots` (overall cardinality/size history)
-- [x] Create repository interfaces for each entity
-- [x] Implement data retention cleanup (90-day default)
-- [x] Add database stats command support
-
-**Migration files:**
-```
-migrations/
-├── 001_initial_schema.sql
-└── 002_indexes.sql
-```
-
-**Deliverable:** Working SQLite layer with all tables
-
----
-
-## Phase 2: Prometheus Integration ✅
-
-### 2.1 Prometheus API Client ✅
-
-**File:** `internal/prometheus/client.go`
-
-**Tasks:**
-- [x] Implement Prometheus HTTP client with configurable timeout
-- [x] Add authentication support (basic auth)
-- [x] Implement connection health check
-- [x] Add retry logic with exponential backoff (3 retries)
-
-**API methods needed:**
-```go
-type Client interface {
-    HealthCheck(ctx context.Context) error
-    GetAllMetricNames(ctx context.Context) ([]string, error)
-    GetMetricCardinality(ctx context.Context, metricName string) (int, error)
-    GetMetricLabels(ctx context.Context, metricName string) ([]LabelInfo, error)
-    GetConfig(ctx context.Context) (*PrometheusConfig, error)  // for scrape_interval
-}
-```
-
-**Deliverable:** Working Prometheus client with health check
-
----
-
-### 2.2 Metrics Collection Service ✅
-
-**File:** `internal/collector/prometheus_collector.go`
-
-**Tasks:**
-- [x] Implement full metrics scan:
-  1. Get all metric names
-  2. For each metric, get cardinality
-  3. Calculate estimated storage size
-  4. Apply team attribution via regex patterns
-- [x] Add progress logging (processing X of Y metrics)
-- [x] Implement batching to avoid overwhelming Prometheus
-- [x] Store results in `metric_snapshots` table
-- [x] Calculate and store snapshot in `snapshots` table
-
-**Performance considerations:**
-- Batch metric queries (50 metrics per batch)
-- Add configurable concurrency (default: 5 parallel requests)
-- Timeout per metric query: 30 seconds
-
-**Deliverable:** Can scan Prometheus and populate database
-
----
-
-### 2.3 Team Attribution ✅
-
-**File:** `internal/analyzer/team_matcher.go`
-
-**Tasks:**
-- [x] Implement regex-based team matching
-- [x] Support multiple patterns per team
-- [x] Handle "unassigned" metrics (no team match)
-- [x] Cache compiled regex patterns
-
-**Example:**
-```go
-func (m *TeamMatcher) GetTeam(metricName string) string {
-    for team, patterns := range m.patterns {
-        for _, pattern := range patterns {
-            if pattern.MatchString(metricName) {
-                return team
-            }
-        }
-    }
-    return "unassigned"
-}
-```
-
-**Deliverable:** Working team attribution
-
----
-
-## Phase 3: Analysis Engine ✅
-
-### 3.1 Size Calculator ✅
-
-**File:** `internal/analyzer/size_calculator.go`
-
-**Tasks:**
-- [x] Implement storage size estimation:
-  ```
-  estimated_size = cardinality × samples_per_day × retention_days × bytes_per_sample
-  ```
-- [x] Support configurable parameters:
-  - `bytes_per_sample`: default 2 bytes (Prometheus TSDB average)
-  - `retention_days`: default 30
-  - `scrape_interval`: default 15s → 5760 samples/day
-- [x] Calculate per-metric storage size (MB/GB)
-- [x] Calculate team breakdown totals (by cardinality and size)
-- [x] Calculate trend (% change from previous scan)
-
-**Deliverable:** Accurate size estimations
-
----
-
-### 3.2 Recommendations Engine ✅
-
-**File:** `internal/analyzer/recommendations.go`
-
-**Tasks:**
-- [x] Implement detection algorithms:
-  1. **High cardinality**: cardinality > 10,000 threshold
-  2. **Unused metrics**: not in any Grafana dashboard queries
-  3. **High-cardinality labels**: labels with >100 unique values
-- [x] Implement priority scoring:
-  - HIGH: cardinality >10K AND low usage
-  - HIGH: metric not used at all
-  - MEDIUM: potential for aggregation
-  - LOW: optimization suggestions
-- [x] Calculate potential size reduction per recommendation
-- [x] Generate actionable descriptions and suggested actions
-- [x] Filter recommendations by min_size_impact threshold (e.g., >100MB)
-
-**Recommendation types:**
-```go
-const (
-    RecommendationHighCardinality  = "high_cardinality"
-    RecommendationUnused           = "unused"
-    RecommendationRetention        = "over_retention"
-    RecommendationRedundantLabels  = "redundant_labels"
-)
-```
-
-**Deliverable:** Working recommendations with priorities
-
----
-
-### 3.3 Trends Calculator ✅
-
-**File:** `internal/analyzer/trends.go`
-
-**Tasks:**
-- [x] Calculate daily/weekly cardinality and size trends
-- [x] Calculate per-metric trend (% change)
-- [x] Support configurable trend periods (7d, 30d, 90d)
-- [x] Handle missing data points gracefully
-
-**Deliverable:** Historical trend data
-
----
-
-## Phase 4: REST API ✅
-
-### 4.1 API Server Setup ✅
-
-**File:** `internal/api/server.go`
-
-**Tasks:**
-- [x] Set up Go 1.22+ stdlib ServeMux with middleware (no external router needed):
-  - Request logging
-  - Recovery (panic handler)
-  - CORS (for development)
-- [x] Implement graceful shutdown
-- [x] Add structured JSON responses
-
-**Deliverable:** HTTP server foundation
-
----
-
-### 4.2 API Endpoints ✅
-
-**Files:** `internal/api/handlers.go`
-
-**Implemented all endpoints:**
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/overview` | Total metrics, cardinality, size, team breakdown |
-| `GET /api/metrics` | List metrics with filtering/sorting |
-| `GET /api/metrics/{name}` | Get specific metric details |
-| `GET /api/recommendations` | List recommendations by priority |
-| `GET /api/trends` | Historical cardinality/size data points |
-| `GET /api/dashboards/unused` | Unused Grafana dashboards |
-| `GET /health` | Service health check |
-
-**Query parameters supported:**
-- `/api/metrics`: `?sort=size|cardinality|name`, `?limit=20`, `?team=backend-core`, `?search=http_`
-- `/api/recommendations`: `?priority=high|medium|low`
-- `/api/trends`: `?period=7d|30d|90d`
-
-**Deliverable:** All REST endpoints working
-
----
-
-## Phase 5: CLI Interface
-
-### 5.1 CLI Framework ✅
-
-**File:** `cmd/metriccost/main.go`
-
-**Tasks:**
-- [x] Set up Cobra CLI framework
-- [x] Implement global flags: `--config`, `--verbose`
-- [x] Add version command
-
-**Deliverable:** CLI skeleton
-
----
-
-### 5.2 CLI Commands
-
-**Implement commands from concept.md:**
-
-| Command | File | Description |
-|---------|------|-------------|
-| `metriccost init` | `cmd/init.go` | Create example config |
-| `metriccost scan` | `cmd/scan.go` | One-time data collection |
-| `metriccost report` | `cmd/report.go` | Print report to console |
-| `metriccost metric <name>` | `cmd/metric.go` | Show specific metric details |
-| `metriccost serve` | `cmd/serve.go` | Start web server |
-| `metriccost export` | `cmd/export.go` | Export data to CSV/JSON |
-| `metriccost db cleanup` | `cmd/db.go` | Database maintenance |
-| `metriccost db stats` | `cmd/db.go` | Show database statistics |
-
-**Report command flags:**
-- `--format=table|json`
-- `--top=20`
-- `--sort=size|cardinality`
-
-**Deliverable:** Full CLI functionality
-
----
-
-## Phase 6: Grafana Integration ✅
-
-### 6.1 Grafana API Client ✅
-
-**File:** `internal/grafana/client.go`
-
-**Tasks:**
-- [x] Implement Grafana HTTP client
-- [x] Add API token authentication
-- [x] Add basic auth support (optional)
-- [x] Implement connection health check
-
-**API methods needed:**
-```go
-type Client interface {
-    HealthCheck(ctx context.Context) error
-    ListDashboards(ctx context.Context) ([]Dashboard, error)
-    GetDashboard(ctx context.Context, uid string) (*DashboardDetail, error)
-}
-```
-
-**Deliverable:** Working Grafana client
-
----
-
-### 6.2 Dashboard Analysis ✅
-
-**File:** `internal/collector/grafana_collector.go`
-
-**Tasks:**
-- [x] Fetch all dashboards via `/api/search`
-- [x] For each dashboard:
-  - Parse panel queries to extract metric names
-  - Get `last_viewed_at` from dashboard metadata
-  - Count queries per dashboard
-- [x] Identify unused dashboards (not viewed for >90 days)
-- [x] Store results in `dashboard_stats` table
-- [x] Cross-reference metrics used in dashboards with collected metrics
-
-**Query parsing:**
-- Extract metric names from PromQL queries
-- Handle various query formats (raw PromQL, templated variables)
-
-**Deliverable:** Dashboard usage tracking
-
----
-
-## Phase 7: React Frontend
-
-### 7.1 React Project Setup
-
-**Directory:** `web/`
-
-**Tasks:**
-- [ ] Initialize Vite + React + TypeScript project
-- [ ] Install dependencies:
-  ```
-  tailwindcss
-  @tailwindcss/forms
-  recharts
-  react-router-dom
-  @tanstack/react-query
-  lucide-react (icons)
-  ```
-- [ ] Configure Tailwind CSS
-- [ ] Set up API client with React Query
-- [ ] Create base layout component (nav, sidebar)
-
-**Project structure:**
-```
-web/
-├── src/
-│   ├── components/
-│   │   ├── layout/
-│   │   ├── charts/
-│   │   └── ui/
-│   ├── pages/
-│   │   ├── Dashboard.tsx
-│   │   ├── Metrics.tsx
-│   │   ├── Recommendations.tsx
-│   │   └── Dashboards.tsx
-│   ├── api/
-│   │   └── client.ts
-│   ├── hooks/
-│   ├── types/
-│   └── App.tsx
-├── index.html
-├── vite.config.ts
-├── tailwind.config.js
-└── package.json
-```
-
-**Deliverable:** React project foundation
-
----
-
-### 7.2 Dashboard Page (/)
-
-**File:** `web/src/pages/Dashboard.tsx`
-
-**Components to build:**
-- [ ] `MetricCard` - Hero stat cards (total metrics, total cardinality, total size, trend %)
-- [ ] `SizeTrendChart` - Line chart showing 30-day cardinality/size trend (Recharts)
-- [ ] `TopMetricsTable` - Table of top 10 largest metrics (by cardinality or size)
-- [ ] `QuickWinsList` - Top 5 recommendations list
-
-**Layout:** Match wireframe from concept.md
-
-**Deliverable:** Working dashboard page
-
----
-
-### 7.3 Metrics Page (/metrics)
-
-**File:** `web/src/pages/Metrics.tsx`
-
-**Features to implement:**
-- [ ] Searchable data table with columns:
-  - Metric Name
-  - Cardinality (time series count)
-  - Estimated Size (MB/GB)
-  - Team
-  - Trend (% change)
-- [ ] Team filter dropdown
-- [ ] Column sorting (click header)
-- [ ] Pagination (20 items per page)
-- [ ] Search input (filter by metric name)
-
-**Deliverable:** Working metrics table with filtering
-
----
-
-### 7.4 Recommendations Page (/recommendations)
-
-**File:** `web/src/pages/Recommendations.tsx`
-
-**Features to implement:**
-- [ ] Tab navigation: High / Medium / Low priority
-- [ ] Recommendation cards showing:
-  - Metric name (linked)
-  - Type badge (high-cardinality, unused, etc.)
-  - Current cardinality / size
-  - Potential size reduction (highlighted)
-  - Description text
-  - Suggested action (code block if applicable)
-- [ ] Empty state when no recommendations
-
-**Deliverable:** Working recommendations page
-
----
-
-### 7.5 Dashboards Page (/dashboards)
-
-**File:** `web/src/pages/Dashboards.tsx`
-
-**Features to implement:**
-- [ ] Table of unused Grafana dashboards:
-  - Dashboard name (external link to Grafana)
-  - Last viewed date
-  - Days since last view
-  - Metrics count
-- [ ] Sort by days since last view
-
-**Deliverable:** Working dashboards page
-
----
-
-### 7.6 Frontend Embedding
-
-**File:** `internal/api/static.go`
-
-**Tasks:**
-- [ ] Build React app for production (`npm run build`)
-- [ ] Embed `web/dist/` into Go binary using `//go:embed`
-- [ ] Serve static files from embedded filesystem
-- [ ] Handle SPA routing (serve index.html for all non-API routes)
-
-**Example:**
-```go
-//go:embed web/dist
-var webFS embed.FS
-
-func ServeStatic(r chi.Router) {
-    r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-        // Serve from embedded FS
-    })
-}
-```
-
-**Deliverable:** Single binary with embedded frontend
-
----
-
-## Phase 8: Background Scheduler ✅
-
-### 8.1 Scheduler Implementation ✅
-
-**File:** `internal/scheduler/scheduler.go`
-
-**Tasks:**
-- [x] Implement background job runner
-- [x] Support configurable collection interval (default: 24h)
-- [x] Implement graceful shutdown
-- [x] Add job status tracking
-- [x] Log collection progress and results
-- [x] Add manual scan trigger via API (`POST /api/scan`)
-- [x] Add scan status endpoint (`GET /api/scan/status`)
-
-**Jobs scheduled:**
-1. Prometheus metrics collection
-2. Grafana dashboard collection
-3. Recommendations generation
-
-**Deliverable:** Working background scheduler with HTTP API
-
----
-
-## Phase 9: Testing & Quality
-
-### 9.1 Unit Tests
-
-**Priority tests:**
-- [ ] `internal/analyzer/size_calculator_test.go` - Size formula accuracy
-- [ ] `internal/analyzer/team_matcher_test.go` - Regex matching
-- [ ] `internal/analyzer/recommendations_test.go` - Priority scoring
-- [ ] `internal/config/config_test.go` - Config parsing and defaults
-
-**Target:** 70% coverage on core analysis logic
-
----
-
-### 9.2 Integration Tests
-
-**Optional for MVP:**
-- [ ] Prometheus client with mock server
-- [ ] SQLite repository operations
-- [ ] API endpoint responses
-
----
-
-## Phase 10: Packaging & Deployment
-
-### 10.1 Build System
-
-**Makefile targets:**
-```makefile
-build:          # Build binary for current platform
-build-all:      # Cross-compile for linux/darwin/windows
-build-frontend: # Build React app
-test:           # Run all tests
-lint:           # Run golangci-lint
-docker:         # Build Docker image
-release:        # Create release artifacts
-```
-
-**Deliverable:** Automated build pipeline
-
----
-
-### 10.2 Docker Support
-
-**File:** `Dockerfile`
-
-**Tasks:**
-- [ ] Multi-stage Dockerfile:
-  1. Stage 1: Build frontend (Node.js)
-  2. Stage 2: Build Go binary
-  3. Stage 3: Final minimal image (scratch or alpine)
-- [ ] Create `docker-compose.yaml` for local development
-- [ ] Document Docker usage in README
-
-**Deliverable:** Working Docker image
-
----
-
-## Implementation Order Summary
+### 7.2 Scans List Page (Home)
 
 ```
-Week 1-2: Phase 1-2
-├── 1.1 Go project setup
-├── 1.2 Configuration system
-├── 1.3 SQLite database layer
-├── 2.1 Prometheus API client
-├── 2.2 Metrics collection
-└── 2.3 Team attribution
-
-Week 3-4: Phase 3-5
-├── 3.1 Size calculator
-├── 3.2 Recommendations engine
-├── 3.3 Trends calculator
-├── 4.1 API server setup
-├── 4.2 API endpoints
-├── 5.1 CLI framework
-└── 5.2 CLI commands
-
-Week 5-6: Phase 7
-├── 7.1 React project setup
-├── 7.2 Dashboard page
-├── 7.3 Metrics page
-├── 7.4 Recommendations page
-├── 7.5 Dashboards page
-└── 7.6 Frontend embedding
-
-Week 7-8: Phase 6, 8-10
-├── 6.1 Grafana API client
-├── 6.2 Dashboard analysis
-├── 8.1 Background scheduler
-├── 9.1 Unit tests
-├── 10.1 Build system
-└── 10.2 Docker support
+┌─────────────────────────────────────────────────────────┐
+│ Metrics Audit                         [Run Scan] [Status]
+├─────────────────────────────────────────────────────────┤
+│ Scan History                                            │
+├─────────────────────────────────────────────────────────┤
+│ Date                 │ Services │ Series    │ Duration  │
+│ 2024-01-15 02:00     │ 127      │ 2,400,000 │ 12m 34s   │  ← click
+│ 2024-01-14 02:00     │ 125      │ 2,350,000 │ 11m 22s   │
+│ 2024-01-13 02:00     │ 124      │ 2,300,000 │ 10m 45s   │
+└─────────────────────────────────────────────────────────┘
 ```
 
+### 7.3 Services List Page (for selected scan)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ← Scans / 2024-01-15 02:00                              │
+├─────────────────────────────────────────────────────────┤
+│ 127 services │ 2.4M total series                        │
+├─────────────────────────────────────────────────────────┤
+│ [Search...]                              Sort: [Series ▼]
+├─────────────────────────────────────────────────────────┤
+│ Service              │ Series    │ Metrics              │
+│ payment-gateway      │ 245,231   │ 89                   │
+│ user-service         │ 189,442   │ 67                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 7.4 Service Detail Page (metrics list)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ← 2024-01-15 / payment-gateway                          │
+├─────────────────────────────────────────────────────────┤
+│ 245,231 series │ 89 metrics                             │
+├─────────────────────────────────────────────────────────┤
+│ Metric                        │ Series   │ Labels       │
+│ http_request_duration_seconds │ 45,231   │ 8            │
+│ http_requests_total           │ 38,992   │ 6            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 7.5 Metric Detail Page (labels list)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ← payment-gateway / http_request_duration_seconds       │
+├─────────────────────────────────────────────────────────┤
+│ 45,231 series │ 8 labels                                │
+├─────────────────────────────────────────────────────────┤
+│ Label       │ Unique Values │ Sample Values             │
+│ endpoint    │ 1,234         │ /api/v1/pay, /api/v1/...  │
+│ status_code │ 8             │ 200, 201, 400, 404, ...   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 7.6 Navigation
+
+**Routes (hash-based):**
+```
+#/                                    → Scans list OR auto-redirect to latest
+#/scans/{id}                          → Services list
+#/scans/{id}/services/{name}          → Metrics list
+#/scans/{id}/services/{s}/metrics/{m} → Labels list
+```
+
+**Default behavior:** On load, fetch `/api/scans/latest` and navigate to that scan's services.
+User can go back to scans list to see history and compare.
+
+- [ ] Breadcrumb navigation at each level
+- [ ] Scan controls in header (trigger scan, status)
+- [ ] "All Scans" link to see history
+
 ---
 
-## Technical Decisions
+## Phase 8: Cleanup
 
-### Why These Libraries?
+### 8.1 Final Cleanup
 
-| Library | Purpose | Rationale |
-|---------|---------|-----------|
-| `modernc.org/sqlite` | SQLite | Pure Go, no CGO required, easier cross-compilation |
-| `chi` | HTTP router | Lightweight, idiomatic, good middleware support |
-| `cobra` | CLI | Industry standard, excellent UX |
-| `viper` | Config | Supports YAML, env vars, defaults |
-| `log/slog` | Logging | Stdlib (Go 1.21+), structured, no external deps |
-| `Vite` | Frontend build | Fast HMR, excellent DX |
-| `React Query` | Data fetching | Caching, refetching, loading states |
-| `Recharts` | Charts | Simple API, React-native, responsive |
-
-### Database Choice
-
-SQLite with `modernc.org/sqlite` (pure Go) chosen over:
-- `mattn/go-sqlite3`: Requires CGO, complicates cross-compilation
-- PostgreSQL: Adds external dependency, overkill for MVP
-- BoltDB: Less mature, no SQL support
-
-### Frontend Architecture
-
-React + TypeScript chosen for:
-- Type safety
-- Component reusability
-- Excellent tooling
-- Easy to embed in Go binary
+- [ ] Remove all unused files
+- [ ] Update `main.go`
+- [ ] Update `config.yaml`
+- [ ] Test full flow
 
 ---
 
-## Risk Mitigation During Implementation
+## Files Summary
 
-| Risk | Mitigation |
-|------|------------|
-| Prometheus API rate limiting | Implement request batching and configurable concurrency |
-| Large metric counts (>100K) | Add pagination, progress reporting, memory-efficient processing |
-| SQLite performance | Add proper indexes, connection pooling, periodic VACUUM |
-| Frontend bundle size | Code splitting, lazy loading routes |
-| Cross-compilation issues | Use pure Go libraries (no CGO) |
+### Completed ✅
+- `storage/migrations/001_initial_schema.sql` - rewritten
+- `storage/sqlite.go` - updated
+- `storage/snapshots_repo.go` - rewritten
+- `storage/services_repo.go` - created
+- `storage/metrics_repo.go` - rewritten
+- `storage/labels_repo.go` - created
+- `models/models.go` - rewritten
+
+### Deleted ✅
+- `storage/recommendations_repo.go`
+- `storage/dashboards_repo.go`
+
+### To Do
+- `config/config.go` - simplify
+- `prometheus/client.go` - add service discovery
+- `collector/prometheus_collector.go` - rewrite
+- `api/handlers.go` - rewrite
+- `api/server.go` - update routes
+- `web/src/api.ts` - update types
+- `web/src/App.tsx` - rewrite UI
+- `main.go` - update wiring
+
+### To Remove
+- `analyzer/` directory
+- `grafana/` directory
+- `collector/grafana_collector.go`
 
 ---
 
-## Definition of Done
+## Out of Scope (MVP)
 
-A task is complete when:
-1. Code compiles without errors
-2. Unit tests pass (where applicable)
-3. Manual testing confirms functionality
-4. Code follows Go idioms and project structure
-5. Error handling is implemented
-
----
-
-## Progress
-
-### Completed
-- ✅ Phase 1: Project Setup & Foundation
-- ✅ Phase 2: Prometheus Integration
-- ✅ Phase 6: Grafana Integration
-- ✅ Phase 3: Analysis Engine
-- ✅ Phase 4: REST API (using Go 1.22+ stdlib, no chi)
-- ✅ Phase 8: Background Scheduler (with scan trigger API)
-- ⏭️ Phase 5: CLI Commands (skipped - service runs as HTTP server for K8s)
-
-### Completed
-- ✅ Phase 7: React Frontend (minimalistic, embedded in binary)
-
-### Next Steps
-1. Phase 10: Docker/Kubernetes deployment
-
-### Working Commands
-- `metriccost init` - creates config.yaml
-- `metriccost version` - shows version info
+- ❌ Trends/Deltas (Δ1d, Δ7d, Δ30d)
+- ❌ Trend charts
+- ❌ Grafana integration
+- ❌ Recommendations
+- ❌ Team attribution
+- ❌ Alerts/notifications
+- ❌ Authentication

@@ -79,23 +79,23 @@ func (db *DB) migrate() error {
 func (db *DB) Stats(ctx context.Context) (*DBStats, error) {
 	var stats DBStats
 
-	row := db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM metric_snapshots")
+	row := db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM snapshots")
+	if err := row.Scan(&stats.SnapshotsCount); err != nil {
+		return nil, err
+	}
+
+	row = db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM service_snapshots")
+	if err := row.Scan(&stats.ServiceSnapshotsCount); err != nil {
+		return nil, err
+	}
+
+	row = db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM metric_snapshots")
 	if err := row.Scan(&stats.MetricSnapshotsCount); err != nil {
 		return nil, err
 	}
 
-	row = db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM recommendations")
-	if err := row.Scan(&stats.RecommendationsCount); err != nil {
-		return nil, err
-	}
-
-	row = db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM dashboard_stats")
-	if err := row.Scan(&stats.DashboardStatsCount); err != nil {
-		return nil, err
-	}
-
-	row = db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM snapshots")
-	if err := row.Scan(&stats.SnapshotsCount); err != nil {
+	row = db.conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM label_snapshots")
+	if err := row.Scan(&stats.LabelSnapshotsCount); err != nil {
 		return nil, err
 	}
 
@@ -108,35 +108,31 @@ func (db *DB) Stats(ctx context.Context) (*DBStats, error) {
 }
 
 type DBStats struct {
-	MetricSnapshotsCount int64
-	RecommendationsCount int64
-	DashboardStatsCount  int64
-	SnapshotsCount       int64
-	SizeBytes            int64
+	SnapshotsCount        int64
+	ServiceSnapshotsCount int64
+	MetricSnapshotsCount  int64
+	LabelSnapshotsCount   int64
+	SizeBytes             int64
 }
 
 func (db *DB) Cleanup(ctx context.Context, retention time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-retention).Format(time.RFC3339)
-	var totalDeleted int64
 
-	tables := []string{"metric_snapshots", "dashboard_stats", "snapshots"}
-	for _, table := range tables {
-		result, err := db.conn.ExecContext(ctx,
-			fmt.Sprintf("DELETE FROM %s WHERE collected_at < ?", table),
-			cutoff,
-		)
-		if err != nil {
-			return totalDeleted, fmt.Errorf("failed to cleanup %s: %w", table, err)
-		}
-		deleted, _ := result.RowsAffected()
-		totalDeleted += deleted
+	// Due to CASCADE deletes, we only need to delete from snapshots
+	result, err := db.conn.ExecContext(ctx,
+		"DELETE FROM snapshots WHERE collected_at < ?",
+		cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup snapshots: %w", err)
 	}
+	deleted, _ := result.RowsAffected()
 
 	if _, err := db.conn.ExecContext(ctx, "VACUUM"); err != nil {
 		slog.Warn("failed to vacuum database", "error", err)
 	}
 
-	return totalDeleted, nil
+	return deleted, nil
 }
 
 func (db *DB) Conn() *sql.DB {

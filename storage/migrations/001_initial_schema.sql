@@ -1,59 +1,44 @@
--- metric_snapshots: daily snapshot per metric
-CREATE TABLE IF NOT EXISTS metric_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    collected_at TIMESTAMP NOT NULL,
-    metric_name TEXT NOT NULL,
-    cardinality INTEGER NOT NULL,
-    sample_count INTEGER,
-    team TEXT,
-    labels_json TEXT,
-    UNIQUE(metric_name, collected_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_metric_snapshots_date ON metric_snapshots(collected_at);
-CREATE INDEX IF NOT EXISTS idx_metric_snapshots_metric ON metric_snapshots(metric_name);
-CREATE INDEX IF NOT EXISTS idx_metric_snapshots_team ON metric_snapshots(team);
-
--- recommendations: optimization recommendations
-CREATE TABLE IF NOT EXISTS recommendations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    created_at TIMESTAMP NOT NULL,
-    metric_name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    priority TEXT NOT NULL,
-    current_cardinality INTEGER,
-    potential_reduction INTEGER,
-    reduction_percentage REAL,
-    description TEXT,
-    suggested_action TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_recommendations_priority ON recommendations(priority);
-CREATE INDEX IF NOT EXISTS idx_recommendations_type ON recommendations(type);
-
--- dashboard_stats: Grafana dashboard usage tracking
-CREATE TABLE IF NOT EXISTS dashboard_stats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    collected_at TIMESTAMP NOT NULL,
-    dashboard_uid TEXT NOT NULL,
-    dashboard_name TEXT NOT NULL,
-    folder_name TEXT,
-    last_viewed_at TIMESTAMP,
-    query_count INTEGER,
-    metrics_used TEXT,
-    UNIQUE(dashboard_uid, collected_at)
-);
-
-CREATE INDEX IF NOT EXISTS idx_dashboard_stats_uid ON dashboard_stats(dashboard_uid);
-CREATE INDEX IF NOT EXISTS idx_dashboard_stats_date ON dashboard_stats(collected_at);
-
--- snapshots: overall system snapshots
+-- Snapshot metadata (one per daily scan)
 CREATE TABLE IF NOT EXISTS snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     collected_at TIMESTAMP NOT NULL UNIQUE,
-    total_metrics INTEGER NOT NULL,
-    total_cardinality INTEGER NOT NULL,
-    team_breakdown TEXT
+    scan_duration_ms INTEGER,
+    total_services INTEGER NOT NULL DEFAULT 0,
+    total_series INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX IF NOT EXISTS idx_snapshots_time ON snapshots(collected_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_snapshots_date ON snapshots(collected_at);
+-- Service level (top of hierarchy)
+CREATE TABLE IF NOT EXISTS service_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    service_name TEXT NOT NULL,
+    total_series INTEGER NOT NULL DEFAULT 0,
+    metric_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(snapshot_id, service_name)
+);
+CREATE INDEX IF NOT EXISTS idx_service_snapshots_lookup ON service_snapshots(snapshot_id, service_name);
+CREATE INDEX IF NOT EXISTS idx_service_snapshots_name ON service_snapshots(service_name);
+
+-- Metric level (per service)
+CREATE TABLE IF NOT EXISTS metric_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    service_snapshot_id INTEGER NOT NULL REFERENCES service_snapshots(id) ON DELETE CASCADE,
+    metric_name TEXT NOT NULL,
+    series_count INTEGER NOT NULL DEFAULT 0,
+    label_count INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(service_snapshot_id, metric_name)
+);
+CREATE INDEX IF NOT EXISTS idx_metric_snapshots_lookup ON metric_snapshots(service_snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_metric_snapshots_name ON metric_snapshots(metric_name);
+
+-- Label level (per metric)
+CREATE TABLE IF NOT EXISTS label_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_snapshot_id INTEGER NOT NULL REFERENCES metric_snapshots(id) ON DELETE CASCADE,
+    label_name TEXT NOT NULL,
+    unique_values_count INTEGER NOT NULL DEFAULT 0,
+    sample_values TEXT,
+    UNIQUE(metric_snapshot_id, label_name)
+);
+CREATE INDEX IF NOT EXISTS idx_label_snapshots_lookup ON label_snapshots(metric_snapshot_id);

@@ -3,8 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/illenko/metriccost/models"
@@ -18,115 +16,122 @@ func NewSnapshotsRepository(db *DB) *SnapshotsRepository {
 	return &SnapshotsRepository{db: db}
 }
 
-func (r *SnapshotsRepository) Save(ctx context.Context, s *models.Snapshot) error {
-	teamJSON, err := json.Marshal(s.TeamBreakdown)
-	if err != nil {
-		return fmt.Errorf("failed to marshal team breakdown: %w", err)
-	}
-
+func (r *SnapshotsRepository) Create(ctx context.Context, s *models.Snapshot) (int64, error) {
 	query := `
-		INSERT INTO snapshots (collected_at, total_metrics, total_cardinality, team_breakdown)
+		INSERT INTO snapshots (collected_at, scan_duration_ms, total_services, total_series)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(collected_at) DO UPDATE SET
-			total_metrics = excluded.total_metrics,
-			total_cardinality = excluded.total_cardinality,
-			team_breakdown = excluded.team_breakdown
 	`
+	result, err := r.db.conn.ExecContext(ctx, query,
+		s.CollectedAt.Format(time.RFC3339),
+		s.ScanDurationMs,
+		s.TotalServices,
+		s.TotalSeries,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
 
-	_, err = r.db.conn.ExecContext(ctx, query,
-		s.CollectedAt.Format(time.RFC3339), s.TotalMetrics, s.TotalCardinality, string(teamJSON),
+func (r *SnapshotsRepository) Update(ctx context.Context, s *models.Snapshot) error {
+	query := `
+		UPDATE snapshots
+		SET scan_duration_ms = ?, total_services = ?, total_series = ?
+		WHERE id = ?
+	`
+	_, err := r.db.conn.ExecContext(ctx, query,
+		s.ScanDurationMs,
+		s.TotalServices,
+		s.TotalSeries,
+		s.ID,
 	)
 	return err
 }
 
 func (r *SnapshotsRepository) GetLatest(ctx context.Context) (*models.Snapshot, error) {
 	query := `
-		SELECT id, collected_at, total_metrics, total_cardinality, team_breakdown
+		SELECT id, collected_at, scan_duration_ms, total_services, total_series
 		FROM snapshots
 		ORDER BY collected_at DESC
 		LIMIT 1
 	`
-
-	var s models.Snapshot
-	var collectedAt string
-	var teamJSON sql.NullString
-
-	err := r.db.conn.QueryRowContext(ctx, query).Scan(
-		&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &teamJSON,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	s.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
-	if teamJSON.Valid && teamJSON.String != "" {
-		if err := json.Unmarshal([]byte(teamJSON.String), &s.TeamBreakdown); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal team breakdown: %w", err)
-		}
-	}
-
-	return &s, nil
+	return r.scanOne(r.db.conn.QueryRowContext(ctx, query))
 }
 
-func (r *SnapshotsRepository) GetTrends(ctx context.Context, since time.Time) ([]*models.Snapshot, error) {
+func (r *SnapshotsRepository) GetByID(ctx context.Context, id int64) (*models.Snapshot, error) {
 	query := `
-		SELECT id, collected_at, total_metrics, total_cardinality, team_breakdown
+		SELECT id, collected_at, scan_duration_ms, total_services, total_series
 		FROM snapshots
-		WHERE collected_at >= ?
-		ORDER BY collected_at ASC
+		WHERE id = ?
 	`
+	return r.scanOne(r.db.conn.QueryRowContext(ctx, query, id))
+}
 
-	rows, err := r.db.conn.QueryContext(ctx, query, since.Format(time.RFC3339))
+func (r *SnapshotsRepository) List(ctx context.Context, limit int) ([]models.Snapshot, error) {
+	query := `
+		SELECT id, collected_at, scan_duration_ms, total_services, total_series
+		FROM snapshots
+		ORDER BY collected_at DESC
+		LIMIT ?
+	`
+	rows, err := r.db.conn.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var snapshots []*models.Snapshot
+	var snapshots []models.Snapshot
 	for rows.Next() {
-		var s models.Snapshot
-		var collectedAt string
-		var teamJSON sql.NullString
-
-		err := rows.Scan(
-			&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &teamJSON,
-		)
+		s, err := r.scanFromRows(rows)
 		if err != nil {
 			return nil, err
 		}
-
-		s.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
-		if teamJSON.Valid && teamJSON.String != "" {
-			if err := json.Unmarshal([]byte(teamJSON.String), &s.TeamBreakdown); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal team breakdown: %w", err)
-			}
-		}
-
-		snapshots = append(snapshots, &s)
+		snapshots = append(snapshots, *s)
 	}
-
 	return snapshots, rows.Err()
 }
 
-func (r *SnapshotsRepository) GetPrevious(ctx context.Context, before time.Time) (*models.Snapshot, error) {
+func (r *SnapshotsRepository) GetByDate(ctx context.Context, date time.Time) (*models.Snapshot, error) {
+	// Find snapshot closest to the given date (same day)
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
+
 	query := `
-		SELECT id, collected_at, total_metrics, total_cardinality, team_breakdown
+		SELECT id, collected_at, scan_duration_ms, total_services, total_series
 		FROM snapshots
-		WHERE collected_at < ?
+		WHERE collected_at >= ? AND collected_at < ?
 		ORDER BY collected_at DESC
 		LIMIT 1
 	`
+	return r.scanOne(r.db.conn.QueryRowContext(ctx, query,
+		startOfDay.Format(time.RFC3339),
+		endOfDay.Format(time.RFC3339),
+	))
+}
 
+func (r *SnapshotsRepository) GetNDaysAgo(ctx context.Context, days int) (*models.Snapshot, error) {
+	targetDate := time.Now().AddDate(0, 0, -days)
+	return r.GetByDate(ctx, targetDate)
+}
+
+func (r *SnapshotsRepository) DeleteOlderThan(ctx context.Context, days int) (int64, error) {
+	cutoff := time.Now().AddDate(0, 0, -days)
+	result, err := r.db.conn.ExecContext(ctx,
+		"DELETE FROM snapshots WHERE collected_at < ?",
+		cutoff.Format(time.RFC3339),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func (r *SnapshotsRepository) scanOne(row *sql.Row) (*models.Snapshot, error) {
 	var s models.Snapshot
 	var collectedAt string
-	var teamJSON sql.NullString
+	var scanDuration sql.NullInt64
 
-	err := r.db.conn.QueryRowContext(ctx, query, before.Format(time.RFC3339)).Scan(
-		&s.ID, &collectedAt, &s.TotalMetrics, &s.TotalCardinality, &teamJSON,
-	)
+	err := row.Scan(&s.ID, &collectedAt, &scanDuration, &s.TotalServices, &s.TotalSeries)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -135,23 +140,25 @@ func (r *SnapshotsRepository) GetPrevious(ctx context.Context, before time.Time)
 	}
 
 	s.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
-	if teamJSON.Valid && teamJSON.String != "" {
-		if err := json.Unmarshal([]byte(teamJSON.String), &s.TeamBreakdown); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal team breakdown: %w", err)
-		}
+	if scanDuration.Valid {
+		s.ScanDurationMs = int(scanDuration.Int64)
 	}
-
 	return &s, nil
 }
 
-func (r *SnapshotsRepository) CalculateTrend(ctx context.Context, current *models.Snapshot) (float64, error) {
-	prev, err := r.GetPrevious(ctx, current.CollectedAt)
+func (r *SnapshotsRepository) scanFromRows(rows *sql.Rows) (*models.Snapshot, error) {
+	var s models.Snapshot
+	var collectedAt string
+	var scanDuration sql.NullInt64
+
+	err := rows.Scan(&s.ID, &collectedAt, &scanDuration, &s.TotalServices, &s.TotalSeries)
 	if err != nil {
-		return 0, err
-	}
-	if prev == nil || prev.TotalCardinality == 0 {
-		return 0, nil
+		return nil, err
 	}
 
-	return float64(current.TotalCardinality-prev.TotalCardinality) / float64(prev.TotalCardinality) * 100, nil
+	s.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
+	if scanDuration.Valid {
+		s.ScanDurationMs = int(scanDuration.Int64)
+	}
+	return &s, nil
 }

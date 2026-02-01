@@ -3,9 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/illenko/metriccost/models"
 )
@@ -18,30 +16,24 @@ func NewMetricsRepository(db *DB) *MetricsRepository {
 	return &MetricsRepository{db: db}
 }
 
-func (r *MetricsRepository) Save(ctx context.Context, m *models.MetricSnapshot) error {
-	labelsJSON, err := json.Marshal(m.Labels)
-	if err != nil {
-		return fmt.Errorf("failed to marshal labels: %w", err)
-	}
-
+func (r *MetricsRepository) Create(ctx context.Context, m *models.MetricSnapshot) (int64, error) {
 	query := `
-		INSERT INTO metric_snapshots (collected_at, metric_name, cardinality, sample_count, team, labels_json)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(metric_name, collected_at) DO UPDATE SET
-			cardinality = excluded.cardinality,
-			sample_count = excluded.sample_count,
-			team = excluded.team,
-			labels_json = excluded.labels_json
+		INSERT INTO metric_snapshots (service_snapshot_id, metric_name, series_count, label_count)
+		VALUES (?, ?, ?, ?)
 	`
-
-	_, err = r.db.conn.ExecContext(ctx, query,
-		m.CollectedAt.Format(time.RFC3339), m.MetricName, m.Cardinality,
-		m.SampleCount, m.Team, string(labelsJSON),
+	result, err := r.db.conn.ExecContext(ctx, query,
+		m.ServiceSnapshotID,
+		m.MetricName,
+		m.SeriesCount,
+		m.LabelCount,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
 }
 
-func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.MetricSnapshot) error {
+func (r *MetricsRepository) CreateBatch(ctx context.Context, metrics []*models.MetricSnapshot) error {
 	tx, err := r.db.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -49,13 +41,8 @@ func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.Met
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO metric_snapshots (collected_at, metric_name, cardinality, sample_count, team, labels_json)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(metric_name, collected_at) DO UPDATE SET
-			cardinality = excluded.cardinality,
-			sample_count = excluded.sample_count,
-			team = excluded.team,
-			labels_json = excluded.labels_json
+		INSERT INTO metric_snapshots (service_snapshot_id, metric_name, series_count, label_count)
+		VALUES (?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -63,11 +50,7 @@ func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.Met
 	defer stmt.Close()
 
 	for _, m := range metrics {
-		labelsJSON, _ := json.Marshal(m.Labels)
-		_, err = stmt.ExecContext(ctx,
-			m.CollectedAt.Format(time.RFC3339), m.MetricName, m.Cardinality,
-			m.SampleCount, m.Team, string(labelsJSON),
-		)
+		_, err = stmt.ExecContext(ctx, m.ServiceSnapshotID, m.MetricName, m.SeriesCount, m.LabelCount)
 		if err != nil {
 			return err
 		}
@@ -76,131 +59,41 @@ func (r *MetricsRepository) SaveBatch(ctx context.Context, metrics []*models.Met
 	return tx.Commit()
 }
 
-type ListOptions struct {
-	Limit  int
-	Offset int
-	SortBy string
-	Team   string
-	Search string
+type MetricListOptions struct {
+	Sort  string // "series", "name"
+	Order string // "asc", "desc"
 }
 
-func (r *MetricsRepository) List(ctx context.Context, collectedAt time.Time, opts ListOptions) ([]*models.MetricSnapshot, error) {
+func (r *MetricsRepository) List(ctx context.Context, serviceSnapshotID int64, opts MetricListOptions) ([]models.MetricSnapshot, error) {
 	query := `
-		SELECT id, collected_at, metric_name, cardinality, sample_count, team, labels_json
+		SELECT id, service_snapshot_id, metric_name, series_count, label_count
 		FROM metric_snapshots
-		WHERE collected_at = ?
+		WHERE service_snapshot_id = ?
 	`
-	args := []interface{}{collectedAt.Format(time.RFC3339)}
 
-	if opts.Team != "" {
-		query += " AND team = ?"
-		args = append(args, opts.Team)
+	// Apply sorting
+	orderDir := "DESC"
+	if opts.Order == "asc" {
+		orderDir = "ASC"
 	}
 
-	if opts.Search != "" {
-		query += " AND metric_name LIKE ?"
-		args = append(args, "%"+opts.Search+"%")
-	}
-
-	switch opts.SortBy {
+	switch opts.Sort {
 	case "name":
-		query += " ORDER BY metric_name ASC"
+		query += fmt.Sprintf(" ORDER BY metric_name %s", orderDir)
 	default:
-		query += " ORDER BY cardinality DESC"
+		query += fmt.Sprintf(" ORDER BY series_count %s", orderDir)
 	}
 
-	if opts.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", opts.Limit)
-	}
-	if opts.Offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", opts.Offset)
-	}
-
-	rows, err := r.db.conn.QueryContext(ctx, query, args...)
+	rows, err := r.db.conn.QueryContext(ctx, query, serviceSnapshotID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	return r.scanMetrics(rows)
-}
-
-func (r *MetricsRepository) GetLatestCollectionTime(ctx context.Context) (time.Time, error) {
-	var s sql.NullString
-	err := r.db.conn.QueryRowContext(ctx,
-		"SELECT MAX(collected_at) FROM metric_snapshots",
-	).Scan(&s)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !s.Valid || s.String == "" {
-		return time.Time{}, nil
-	}
-	return time.Parse(time.RFC3339, s.String)
-}
-
-func (r *MetricsRepository) GetTotalCardinality(ctx context.Context, collectedAt time.Time) (int64, error) {
-	var total sql.NullInt64
-	err := r.db.conn.QueryRowContext(ctx,
-		"SELECT SUM(cardinality) FROM metric_snapshots WHERE collected_at = ?",
-		collectedAt.Format(time.RFC3339),
-	).Scan(&total)
-	if err != nil {
-		return 0, err
-	}
-	if !total.Valid {
-		return 0, nil
-	}
-	return total.Int64, nil
-}
-
-func (r *MetricsRepository) GetByName(ctx context.Context, name string) (*models.MetricSnapshot, error) {
-	query := `
-		SELECT id, collected_at, metric_name, cardinality, sample_count, team, labels_json
-		FROM metric_snapshots
-		WHERE metric_name = ?
-		ORDER BY collected_at DESC
-		LIMIT 1
-	`
-
-	row := r.db.conn.QueryRowContext(ctx, query, name)
-	return r.scanMetric(row)
-}
-
-func (r *MetricsRepository) GetTrend(ctx context.Context, name string, current, previous time.Time) (float64, error) {
-	var currentCard, previousCard int
-
-	err := r.db.conn.QueryRowContext(ctx,
-		"SELECT cardinality FROM metric_snapshots WHERE metric_name = ? AND collected_at = ?",
-		name, current.Format(time.RFC3339),
-	).Scan(&currentCard)
-	if err != nil {
-		return 0, err
-	}
-
-	err = r.db.conn.QueryRowContext(ctx,
-		"SELECT cardinality FROM metric_snapshots WHERE metric_name = ? AND collected_at = ?",
-		name, previous.Format(time.RFC3339),
-	).Scan(&previousCard)
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-
-	if previousCard == 0 {
-		return 0, nil
-	}
-
-	return float64(currentCard-previousCard) / float64(previousCard) * 100, nil
-}
-
-func (r *MetricsRepository) scanMetrics(rows *sql.Rows) ([]*models.MetricSnapshot, error) {
-	var metrics []*models.MetricSnapshot
+	var metrics []models.MetricSnapshot
 	for rows.Next() {
-		m, err := r.scanMetricFromRows(rows)
-		if err != nil {
+		var m models.MetricSnapshot
+		if err := rows.Scan(&m.ID, &m.ServiceSnapshotID, &m.MetricName, &m.SeriesCount, &m.LabelCount); err != nil {
 			return nil, err
 		}
 		metrics = append(metrics, m)
@@ -208,64 +101,21 @@ func (r *MetricsRepository) scanMetrics(rows *sql.Rows) ([]*models.MetricSnapsho
 	return metrics, rows.Err()
 }
 
-func (r *MetricsRepository) scanMetricFromRows(rows *sql.Rows) (*models.MetricSnapshot, error) {
+func (r *MetricsRepository) GetByName(ctx context.Context, serviceSnapshotID int64, name string) (*models.MetricSnapshot, error) {
+	query := `
+		SELECT id, service_snapshot_id, metric_name, series_count, label_count
+		FROM metric_snapshots
+		WHERE service_snapshot_id = ? AND metric_name = ?
+	`
 	var m models.MetricSnapshot
-	var collectedAt string
-	var labelsJSON sql.NullString
-	var team sql.NullString
-	var sampleCount sql.NullInt64
-
-	err := rows.Scan(
-		&m.ID, &collectedAt, &m.MetricName, &m.Cardinality,
-		&sampleCount, &team, &labelsJSON,
+	err := r.db.conn.QueryRowContext(ctx, query, serviceSnapshotID, name).Scan(
+		&m.ID, &m.ServiceSnapshotID, &m.MetricName, &m.SeriesCount, &m.LabelCount,
 	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-
-	m.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
-	if team.Valid {
-		m.Team = team.String
-	}
-	if sampleCount.Valid {
-		m.SampleCount = int(sampleCount.Int64)
-	}
-	if labelsJSON.Valid && labelsJSON.String != "" {
-		if err := json.Unmarshal([]byte(labelsJSON.String), &m.Labels); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal labels: %w", err)
-		}
-	}
-
-	return &m, nil
-}
-
-func (r *MetricsRepository) scanMetric(row *sql.Row) (*models.MetricSnapshot, error) {
-	var m models.MetricSnapshot
-	var collectedAt string
-	var labelsJSON sql.NullString
-	var team sql.NullString
-	var sampleCount sql.NullInt64
-
-	err := row.Scan(
-		&m.ID, &collectedAt, &m.MetricName, &m.Cardinality,
-		&sampleCount, &team, &labelsJSON,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	m.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
-	if team.Valid {
-		m.Team = team.String
-	}
-	if sampleCount.Valid {
-		m.SampleCount = int(sampleCount.Int64)
-	}
-	if labelsJSON.Valid && labelsJSON.String != "" {
-		if err := json.Unmarshal([]byte(labelsJSON.String), &m.Labels); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal labels: %w", err)
-		}
-	}
-
 	return &m, nil
 }

@@ -2,102 +2,61 @@ package models
 
 import "time"
 
-type MetricSnapshot struct {
-	ID          int64          `json:"id"`
-	CollectedAt time.Time      `json:"collected_at"`
-	MetricName  string         `json:"metric_name"`
-	Cardinality int            `json:"cardinality"`
-	SampleCount int            `json:"sample_count,omitempty"`
-	Team        string         `json:"team,omitempty"`
-	Labels      map[string]int `json:"labels,omitempty"`
-}
-
-type Recommendation struct {
-	ID                  int64     `json:"id"`
-	CreatedAt           time.Time `json:"created_at"`
-	MetricName          string    `json:"metric_name"`
-	Type                string    `json:"type"`
-	Priority            string    `json:"priority"`
-	CurrentCardinality  int       `json:"current_cardinality,omitempty"`
-	PotentialReduction  int       `json:"potential_reduction,omitempty"`
-	ReductionPercentage float64   `json:"reduction_percentage,omitempty"`
-	Description         string    `json:"description"`
-	SuggestedAction     string    `json:"suggested_action"`
-}
-
-const (
-	RecommendationHighCardinality = "high_cardinality"
-	RecommendationUnused          = "unused"
-	RecommendationRedundantLabels = "redundant_labels"
-)
-
-const (
-	PriorityHigh   = "high"
-	PriorityMedium = "medium"
-	PriorityLow    = "low"
-)
-
-type DashboardStats struct {
-	ID            int64     `json:"id"`
-	CollectedAt   time.Time `json:"collected_at"`
-	DashboardUID  string    `json:"dashboard_uid"`
-	DashboardName string    `json:"dashboard_name"`
-	FolderName    string    `json:"folder_name,omitempty"`
-	LastViewedAt  time.Time `json:"last_viewed_at,omitempty"`
-	QueryCount    int       `json:"query_count"`
-	MetricsUsed   []string  `json:"metrics_used,omitempty"`
-}
-
+// Snapshot metadata (one per daily scan)
 type Snapshot struct {
-	ID               int64                  `json:"id"`
-	CollectedAt      time.Time              `json:"collected_at"`
-	TotalMetrics     int                    `json:"total_metrics"`
-	TotalCardinality int64                  `json:"total_cardinality"`
-	TeamBreakdown    map[string]TeamMetrics `json:"team_breakdown,omitempty"`
+	ID             int64     `json:"id"`
+	CollectedAt    time.Time `json:"collected_at"`
+	ScanDurationMs int       `json:"duration_ms,omitempty"`
+	TotalServices  int       `json:"total_services"`
+	TotalSeries    int64     `json:"total_series"`
 }
 
-type TeamMetrics struct {
-	Cardinality int64   `json:"cardinality"`
-	MetricCount int     `json:"metric_count"`
-	Percentage  float64 `json:"percentage"`
+// ServiceSnapshot represents a service at a point in time
+type ServiceSnapshot struct {
+	ID          int64  `json:"id"`
+	SnapshotID  int64  `json:"snapshot_id"`
+	ServiceName string `json:"name"`
+	TotalSeries int    `json:"total_series"`
+	MetricCount int    `json:"metric_count"`
 }
 
+// MetricSnapshot represents a metric within a service at a point in time
+type MetricSnapshot struct {
+	ID                int64  `json:"id"`
+	ServiceSnapshotID int64  `json:"service_snapshot_id"`
+	MetricName        string `json:"name"`
+	SeriesCount       int    `json:"series_count"`
+	LabelCount        int    `json:"label_count"`
+}
+
+// LabelSnapshot represents a label within a metric at a point in time
+type LabelSnapshot struct {
+	ID                int64    `json:"id"`
+	MetricSnapshotID  int64    `json:"metric_snapshot_id"`
+	LabelName         string   `json:"name"`
+	UniqueValuesCount int      `json:"unique_values"`
+	SampleValues      []string `json:"sample_values,omitempty"`
+}
+
+// Overview response for the main dashboard
 type Overview struct {
-	TotalMetrics     int                    `json:"total_metrics"`
-	TotalCardinality int64                  `json:"total_cardinality"`
-	TrendPercentage  float64                `json:"trend_percentage"`
-	LastScan         time.Time              `json:"last_scan"`
-	TeamBreakdown    map[string]TeamMetrics `json:"team_breakdown"`
+	LatestScan    time.Time `json:"latest_scan"`
+	TotalServices int       `json:"total_services"`
+	TotalSeries   int64     `json:"total_series"`
 }
 
-type TrendDataPoint struct {
-	Date         time.Time `json:"date"`
-	TotalMetrics int       `json:"total_metrics"`
-	Cardinality  int64     `json:"cardinality"`
+// ScanStatus represents the current scan state
+type ScanStatus struct {
+	Running      bool      `json:"running"`
+	Progress     string    `json:"progress,omitempty"`
+	LastScanAt   time.Time `json:"last_scan_at,omitempty"`
+	LastDuration string    `json:"last_duration,omitempty"`
 }
 
-type MetricListItem struct {
-	Name            string  `json:"name"`
-	Cardinality     int     `json:"cardinality"`
-	Percentage      float64 `json:"percentage"`
-	Team            string  `json:"team"`
-	TrendPercentage float64 `json:"trend_percentage"`
-}
-
-type UnusedDashboard struct {
-	UID           string    `json:"uid"`
-	Name          string    `json:"name"`
-	FolderName    string    `json:"folder_name,omitempty"`
-	LastViewed    time.Time `json:"last_viewed"`
-	DaysSinceView int       `json:"days_since_view"`
-	MetricsCount  int       `json:"metrics_count"`
-	URL           string    `json:"url,omitempty"`
-}
-
+// HealthStatus for health check endpoint
 type HealthStatus struct {
 	Status              string    `json:"status"`
 	PrometheusConnected bool      `json:"prometheus_connected"`
-	GrafanaConnected    bool      `json:"grafana_connected"`
 	DatabaseOK          bool      `json:"database_ok"`
 	LastScan            time.Time `json:"last_scan,omitempty"`
 }

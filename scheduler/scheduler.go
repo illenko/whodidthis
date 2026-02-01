@@ -6,54 +6,42 @@ import (
 	"sync"
 	"time"
 
-	"github.com/illenko/metriccost/analyzer"
 	"github.com/illenko/metriccost/collector"
 )
 
 type Scheduler struct {
-	promCollector    *collector.PrometheusCollector
-	grafanaCollector *collector.GrafanaCollector
-	recsEngine       *analyzer.RecommendationsEngine
-
-	interval time.Duration
-	stopCh   chan struct{}
-	status   *ScanStatus
-	mu       sync.RWMutex
+	collector *collector.Collector
+	interval  time.Duration
+	stopCh    chan struct{}
+	status    *ScanStatus
+	mu        sync.RWMutex
 }
 
 type ScanStatus struct {
-	Running      bool      `json:"running"`
-	LastScanAt   time.Time `json:"last_scan_at,omitempty"`
-	LastDuration string    `json:"last_duration,omitempty"`
-	LastError    string    `json:"last_error,omitempty"`
-	NextScanAt   time.Time `json:"next_scan_at,omitempty"`
-
-	PrometheusMetrics int `json:"prometheus_metrics,omitempty"`
-	GrafanaDashboards int `json:"grafana_dashboards,omitempty"`
-	Recommendations   int `json:"recommendations,omitempty"`
+	Running       bool      `json:"running"`
+	Progress      string    `json:"progress,omitempty"`
+	LastScanAt    time.Time `json:"last_scan_at,omitempty"`
+	LastDuration  string    `json:"last_duration,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+	NextScanAt    time.Time `json:"next_scan_at,omitempty"`
+	TotalServices int       `json:"total_services,omitempty"`
+	TotalSeries   int64     `json:"total_series,omitempty"`
 }
 
 type Config struct {
 	Interval time.Duration
 }
 
-func New(
-	promCollector *collector.PrometheusCollector,
-	grafanaCollector *collector.GrafanaCollector,
-	recsEngine *analyzer.RecommendationsEngine,
-	cfg Config,
-) *Scheduler {
+func New(collector *collector.Collector, cfg Config) *Scheduler {
 	if cfg.Interval == 0 {
 		cfg.Interval = 24 * time.Hour
 	}
 
 	return &Scheduler{
-		promCollector:    promCollector,
-		grafanaCollector: grafanaCollector,
-		recsEngine:       recsEngine,
-		interval:         cfg.Interval,
-		stopCh:           make(chan struct{}),
-		status:           &ScanStatus{},
+		collector: collector,
+		interval:  cfg.Interval,
+		stopCh:    make(chan struct{}),
+		status:    &ScanStatus{},
 	}
 }
 
@@ -114,6 +102,7 @@ func (s *Scheduler) runScan(ctx context.Context) {
 	}
 	s.status.Running = true
 	s.status.LastError = ""
+	s.status.Progress = "Starting..."
 	s.mu.Unlock()
 
 	start := time.Now()
@@ -123,6 +112,7 @@ func (s *Scheduler) runScan(ctx context.Context) {
 	defer func() {
 		s.mu.Lock()
 		s.status.Running = false
+		s.status.Progress = ""
 		s.status.LastScanAt = start
 		s.status.LastDuration = time.Since(start).String()
 		if scanErr != nil {
@@ -131,50 +121,35 @@ func (s *Scheduler) runScan(ctx context.Context) {
 		s.mu.Unlock()
 	}()
 
-	// Collect Prometheus metrics
-	if s.promCollector != nil {
-		promResult, err := s.promCollector.Collect(ctx)
-		if err != nil {
-			slog.Error("prometheus collection failed", "error", err)
-			scanErr = err
+	// Progress callback
+	progress := func(phase string, current, total int, detail string) {
+		s.mu.Lock()
+		if total > 0 {
+			s.status.Progress = detail
 		} else {
-			s.mu.Lock()
-			s.status.PrometheusMetrics = promResult.TotalMetrics
-			s.mu.Unlock()
+			s.status.Progress = phase
 		}
+		s.mu.Unlock()
 	}
 
-	// Collect Grafana dashboards
-	if s.grafanaCollector != nil {
-		grafanaResult, err := s.grafanaCollector.Collect(ctx)
-		if err != nil {
-			slog.Error("grafana collection failed", "error", err)
-			if scanErr == nil {
-				scanErr = err
-			}
-		} else {
-			s.mu.Lock()
-			s.status.GrafanaDashboards = grafanaResult.TotalDashboards
-			s.mu.Unlock()
-		}
+	// Run collection
+	result, err := s.collector.Collect(ctx, progress)
+	if err != nil {
+		slog.Error("collection failed", "error", err)
+		scanErr = err
+		return
 	}
 
-	// Generate recommendations
-	if s.recsEngine != nil {
-		recsResult, err := s.recsEngine.Analyze(ctx)
-		if err != nil {
-			slog.Error("recommendations analysis failed", "error", err)
-			if scanErr == nil {
-				scanErr = err
-			}
-		} else {
-			s.mu.Lock()
-			s.status.Recommendations = recsResult.TotalRecommendations
-			s.mu.Unlock()
-		}
-	}
+	s.mu.Lock()
+	s.status.TotalServices = result.TotalServices
+	s.status.TotalSeries = result.TotalSeries
+	s.mu.Unlock()
 
-	slog.Info("scan complete", "duration", time.Since(start))
+	slog.Info("scan complete",
+		"services", result.TotalServices,
+		"series", result.TotalSeries,
+		"duration", time.Since(start),
+	)
 }
 
 type scanError string

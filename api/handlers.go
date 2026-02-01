@@ -4,44 +4,41 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/illenko/metriccost/analyzer"
 	"github.com/illenko/metriccost/models"
 	"github.com/illenko/metriccost/scheduler"
 	"github.com/illenko/metriccost/storage"
 )
 
 type Handlers struct {
-	metricsRepo    *storage.MetricsRepository
-	recsRepo       *storage.RecommendationsRepository
-	dashboardsRepo *storage.DashboardsRepository
-	snapshotsRepo  *storage.SnapshotsRepository
-	trends         *analyzer.TrendsCalculator
-	scheduler      *scheduler.Scheduler
-	db             *storage.DB
+	snapshots *storage.SnapshotsRepository
+	services  *storage.ServicesRepository
+	metrics   *storage.MetricsRepository
+	labels    *storage.LabelsRepository
+	scheduler *scheduler.Scheduler
+	db        *storage.DB
 }
 
 type HandlersConfig struct {
-	MetricsRepo    *storage.MetricsRepository
-	RecsRepo       *storage.RecommendationsRepository
-	DashboardsRepo *storage.DashboardsRepository
-	SnapshotsRepo  *storage.SnapshotsRepository
-	Trends         *analyzer.TrendsCalculator
-	Scheduler      *scheduler.Scheduler
-	DB             *storage.DB
+	Snapshots *storage.SnapshotsRepository
+	Services  *storage.ServicesRepository
+	Metrics   *storage.MetricsRepository
+	Labels    *storage.LabelsRepository
+	Scheduler *scheduler.Scheduler
+	DB        *storage.DB
 }
 
 func NewHandlers(cfg HandlersConfig) *Handlers {
 	return &Handlers{
-		metricsRepo:    cfg.MetricsRepo,
-		recsRepo:       cfg.RecsRepo,
-		dashboardsRepo: cfg.DashboardsRepo,
-		snapshotsRepo:  cfg.SnapshotsRepo,
-		trends:         cfg.Trends,
-		scheduler:      cfg.Scheduler,
-		db:             cfg.DB,
+		snapshots: cfg.Snapshots,
+		services:  cfg.Services,
+		metrics:   cfg.Metrics,
+		labels:    cfg.Labels,
+		scheduler: cfg.Scheduler,
+		db:        cfg.DB,
 	}
 }
 
+// Health check
 func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -55,166 +52,257 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 		status.DatabaseOK = false
 	}
 
-	lastScan, _ := h.metricsRepo.GetLatestCollectionTime(ctx)
-	if !lastScan.IsZero() {
-		status.LastScan = lastScan
+	latest, _ := h.snapshots.GetLatest(ctx)
+	if latest != nil {
+		status.LastScan = latest.CollectedAt
 	}
 
 	writeJSON(w, http.StatusOK, status)
 }
 
-func (h *Handlers) GetOverview(w http.ResponseWriter, r *http.Request) {
+// GET /api/scans - list all snapshots
+func (h *Handlers) ListScans(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	overview, err := h.trends.GetOverview(ctx)
+	limit := parseIntParam(r, "limit", 100)
+
+	scans, err := h.snapshots.List(ctx, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, overview)
+	if scans == nil {
+		scans = []models.Snapshot{}
+	}
+
+	writeJSON(w, http.StatusOK, scans)
 }
 
-func (h *Handlers) ListMetrics(w http.ResponseWriter, r *http.Request) {
+// GET /api/scans/latest - get latest snapshot
+func (h *Handlers) GetLatestScan(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	latestTime, err := h.metricsRepo.GetLatestCollectionTime(ctx)
+	scan, err := h.snapshots.GetLatest(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if latestTime.IsZero() {
-		writeJSON(w, http.StatusOK, []models.MetricListItem{})
+
+	if scan == nil {
+		writeError(w, http.StatusNotFound, "no scans found")
 		return
 	}
 
-	opts := storage.ListOptions{
-		Limit:  parseIntParam(r, "limit", 20),
-		Offset: parseIntParam(r, "offset", 0),
-		SortBy: r.URL.Query().Get("sort"),
-		Team:   r.URL.Query().Get("team"),
+	writeJSON(w, http.StatusOK, scan)
+}
+
+// GET /api/scans/{id} - get snapshot details
+func (h *Handlers) GetScan(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+
+	scan, err := h.snapshots.GetByID(ctx, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if scan == nil {
+		writeError(w, http.StatusNotFound, "scan not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, scan)
+}
+
+// GET /api/scans/{id}/services - list services in snapshot
+func (h *Handlers) ListServices(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	scanID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+
+	opts := storage.ServiceListOptions{
+		Sort:   r.URL.Query().Get("sort"),
+		Order:  r.URL.Query().Get("order"),
 		Search: r.URL.Query().Get("search"),
 	}
 
-	metrics, err := h.metricsRepo.List(ctx, latestTime, opts)
+	services, err := h.services.List(ctx, scanID, opts)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	totalCardinality, _ := h.metricsRepo.GetTotalCardinality(ctx, latestTime)
-
-	var items []models.MetricListItem
-	for _, m := range metrics {
-		trend, _ := h.trends.GetMetricTrend(ctx, m.MetricName)
-		percentage := 0.0
-		if totalCardinality > 0 {
-			percentage = float64(m.Cardinality) / float64(totalCardinality) * 100
-		}
-		items = append(items, models.MetricListItem{
-			Name:            m.MetricName,
-			Cardinality:     m.Cardinality,
-			Percentage:      percentage,
-			Team:            m.Team,
-			TrendPercentage: trend,
-		})
+	if services == nil {
+		services = []models.ServiceSnapshot{}
 	}
 
-	writeJSON(w, http.StatusOK, items)
+	writeJSON(w, http.StatusOK, services)
 }
 
+// GET /api/scans/{id}/services/{service} - get service detail
+func (h *Handlers) GetService(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	scanID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+
+	serviceName := r.PathValue("service")
+
+	service, err := h.services.GetByName(ctx, scanID, serviceName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if service == nil {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, service)
+}
+
+// GET /api/scans/{id}/services/{service}/metrics - list metrics for service
+func (h *Handlers) ListMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	scanID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+
+	serviceName := r.PathValue("service")
+
+	// Get service to find serviceSnapshotID
+	service, err := h.services.GetByName(ctx, scanID, serviceName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if service == nil {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+
+	opts := storage.MetricListOptions{
+		Sort:  r.URL.Query().Get("sort"),
+		Order: r.URL.Query().Get("order"),
+	}
+
+	metrics, err := h.metrics.List(ctx, service.ID, opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if metrics == nil {
+		metrics = []models.MetricSnapshot{}
+	}
+
+	writeJSON(w, http.StatusOK, metrics)
+}
+
+// GET /api/scans/{id}/services/{service}/metrics/{metric} - get metric detail
 func (h *Handlers) GetMetric(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	name := r.PathValue("name")
 
-	metric, err := h.metricsRepo.GetByName(ctx, name)
+	scanID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
+
+	serviceName := r.PathValue("service")
+	metricName := r.PathValue("metric")
+
+	// Get service to find serviceSnapshotID
+	service, err := h.services.GetByName(ctx, scanID, serviceName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if service == nil {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+
+	metric, err := h.metrics.GetByName(ctx, service.ID, metricName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if metric == nil {
 		writeError(w, http.StatusNotFound, "metric not found")
 		return
 	}
 
-	trend, _ := h.trends.GetMetricTrend(ctx, name)
-
-	response := struct {
-		*models.MetricSnapshot
-		TrendPercentage float64                  `json:"trend_percentage"`
-		Recommendations []*models.Recommendation `json:"recommendations,omitempty"`
-	}{
-		MetricSnapshot:  metric,
-		TrendPercentage: trend,
-	}
-
-	recs, _ := h.recsRepo.GetByMetricName(ctx, name)
-	if len(recs) > 0 {
-		response.Recommendations = recs
-	}
-
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, metric)
 }
 
-func (h *Handlers) ListRecommendations(w http.ResponseWriter, r *http.Request) {
+// GET /api/scans/{id}/services/{service}/metrics/{metric}/labels - list labels
+func (h *Handlers) ListLabels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	priority := r.URL.Query().Get("priority")
+	scanID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid scan id")
+		return
+	}
 
-	recs, err := h.recsRepo.List(ctx, priority)
+	serviceName := r.PathValue("service")
+	metricName := r.PathValue("metric")
+
+	// Get service to find serviceSnapshotID
+	service, err := h.services.GetByName(ctx, scanID, serviceName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if service == nil {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+
+	// Get metric to find metricSnapshotID
+	metric, err := h.metrics.GetByName(ctx, service.ID, metricName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if metric == nil {
+		writeError(w, http.StatusNotFound, "metric not found")
+		return
+	}
+
+	labels, err := h.labels.List(ctx, metric.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	if recs == nil {
-		recs = []*models.Recommendation{}
+	if labels == nil {
+		labels = []models.LabelSnapshot{}
 	}
 
-	writeJSON(w, http.StatusOK, recs)
+	writeJSON(w, http.StatusOK, labels)
 }
 
-func (h *Handlers) GetTrends(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	periodStr := r.URL.Query().Get("period")
-	var period analyzer.TrendPeriod
-	switch periodStr {
-	case "7d":
-		period = analyzer.TrendPeriod7Days
-	case "90d":
-		period = analyzer.TrendPeriod90Days
-	default:
-		period = analyzer.TrendPeriod30Days
-	}
-
-	trends, err := h.trends.GetOverallTrends(ctx, period)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if trends == nil {
-		trends = []*models.TrendDataPoint{}
-	}
-
-	writeJSON(w, http.StatusOK, trends)
-}
-
-func (h *Handlers) GetUnusedDashboards(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	days := parseIntParam(r, "days", 90)
-
-	dashboards, err := h.dashboardsRepo.GetUnusedDashboards(ctx, days)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	if dashboards == nil {
-		dashboards = []*models.UnusedDashboard{}
-	}
-
-	writeJSON(w, http.StatusOK, dashboards)
-}
-
+// POST /api/scan - trigger scan
 func (h *Handlers) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	if h.scheduler == nil {
 		writeError(w, http.StatusServiceUnavailable, "scheduler not configured")
@@ -234,6 +322,7 @@ func (h *Handlers) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "scan started"})
 }
 
+// GET /api/scan/status - get scan status
 func (h *Handlers) GetScanStatus(w http.ResponseWriter, r *http.Request) {
 	if h.scheduler == nil {
 		writeError(w, http.StatusServiceUnavailable, "scheduler not configured")

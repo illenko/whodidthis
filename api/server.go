@@ -34,25 +34,25 @@ func NewServer(handlers *Handlers, cfg ServerConfig) *Server {
 	// Health
 	mux.HandleFunc("GET /health", handlers.Health)
 
-	// Overview
-	mux.HandleFunc("GET /api/overview", handlers.GetOverview)
-
-	// Metrics
-	mux.HandleFunc("GET /api/metrics", handlers.ListMetrics)
-	mux.HandleFunc("GET /api/metrics/{name}", handlers.GetMetric)
-
-	// Recommendations
-	mux.HandleFunc("GET /api/recommendations", handlers.ListRecommendations)
-
-	// Trends
-	mux.HandleFunc("GET /api/trends", handlers.GetTrends)
-
-	// Dashboards
-	mux.HandleFunc("GET /api/dashboards/unused", handlers.GetUnusedDashboards)
-
-	// Scan
+	// Scan control
 	mux.HandleFunc("POST /api/scan", handlers.TriggerScan)
 	mux.HandleFunc("GET /api/scan/status", handlers.GetScanStatus)
+
+	// Scans (snapshots)
+	mux.HandleFunc("GET /api/scans", handlers.ListScans)
+	mux.HandleFunc("GET /api/scans/latest", handlers.GetLatestScan)
+	mux.HandleFunc("GET /api/scans/{id}", handlers.GetScan)
+
+	// Services (within a scan)
+	mux.HandleFunc("GET /api/scans/{id}/services", handlers.ListServices)
+	mux.HandleFunc("GET /api/scans/{id}/services/{service}", handlers.GetService)
+
+	// Metrics (within a service)
+	mux.HandleFunc("GET /api/scans/{id}/services/{service}/metrics", handlers.ListMetrics)
+	mux.HandleFunc("GET /api/scans/{id}/services/{service}/metrics/{metric}", handlers.GetMetric)
+
+	// Labels (within a metric)
+	mux.HandleFunc("GET /api/scans/{id}/services/{service}/metrics/{metric}/labels", handlers.ListLabels)
 
 	// Static files (frontend)
 	mux.Handle("/", staticHandler())

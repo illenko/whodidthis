@@ -108,28 +108,23 @@ This plan implements the **pivot** from a metric-centric audit tool to a **servi
 
 ---
 
-## Phase 5: Collector
+## Phase 5: Collector ✅
 
-### 5.1 Service-Centric Collection
+### 5.1 Service-Centric Collection ✅
 
-**File:** `collector/prometheus_collector.go` (rewrite)
+**File:** `collector/prometheus_collector.go` (rewritten)
 
-**Collection flow:**
-1. Discover services via label
-2. For each service: get metrics with counts
-3. For each metric: get labels with counts + samples
-4. Store full hierarchy in one transaction
+- [x] Discover services via label
+- [x] For each service: get metrics with counts
+- [x] For each metric: get labels with samples
+- [x] Store full hierarchy
+- [x] Progress callback for status API
 
-**Tasks:**
-- [ ] Implement new collection flow
-- [ ] Add progress callback for status API
-- [ ] Rate limiting (configurable concurrency)
+### 5.2 Remove Unused Code ✅
 
-### 5.2 Remove Unused Code
-
-- [ ] Remove `collector/grafana_collector.go`
-- [ ] Remove `analyzer/` directory
-- [ ] Remove `grafana/` directory
+- [x] Removed `collector/grafana_collector.go`
+- [x] Removed `analyzer/` directory
+- [x] Removed `grafana/` directory
 
 ---
 

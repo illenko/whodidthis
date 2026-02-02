@@ -1,0 +1,24 @@
+prometheus:
+  url: http://localhost:8428
+  # username: ""
+  # password: ""
+  rate_limit: 100       # requests per second (default: 100)
+  rate_limit_burst: 20  # burst size (default: 20)
+
+discovery:
+  service_label: job  # Label used to identify services (e.g., "app", "service", "job")
+
+scan:
+  interval: 1m
+  sample_values_limit: 10  # Max sample values to store per label
+
+storage:
+  path: whodidthis.db
+  retention_days: 90
+
+server:
+  port: 8080
+  host: 0.0.0.0
+
+log:
+  level: info  # debug, info, warn, error

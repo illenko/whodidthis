@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	"golang.org/x/time/rate"
 )
 
 type Client struct {
@@ -17,22 +18,45 @@ type Client struct {
 }
 
 type Config struct {
-	URL      string
-	Username string
-	Password string
-	Timeout  time.Duration
+	URL            string
+	Username       string
+	Password       string
+	Timeout        time.Duration
+	RateLimit      float64 // requests per second, 0 means no limit
+	RateLimitBurst int     // burst size for rate limiting
 }
 
 func NewClient(cfg Config) (*Client, error) {
-	apiCfg := api.Config{
-		Address: cfg.URL,
+	// Set defaults for rate limiting
+	if cfg.RateLimit == 0 {
+		cfg.RateLimit = 100 // 100 requests per second by default
+	}
+	if cfg.RateLimitBurst == 0 {
+		cfg.RateLimitBurst = 20
 	}
 
+	// Build transport chain
+	var transport http.RoundTripper = http.DefaultTransport
+
+	// Add rate limiting
+	limiter := rate.NewLimiter(rate.Limit(cfg.RateLimit), cfg.RateLimitBurst)
+	transport = &rateLimitedTransport{
+		transport: transport,
+		limiter:   limiter,
+	}
+
+	// Add basic auth if configured
 	if cfg.Username != "" && cfg.Password != "" {
-		apiCfg.RoundTripper = &basicAuthTransport{
-			username: cfg.Username,
-			password: cfg.Password,
+		transport = &basicAuthTransport{
+			transport: transport,
+			username:  cfg.Username,
+			password:  cfg.Password,
 		}
+	}
+
+	apiCfg := api.Config{
+		Address:      cfg.URL,
+		RoundTripper: transport,
 	}
 
 	client, err := api.NewClient(apiCfg)
@@ -155,6 +179,13 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 	// Collect unique values per label
 	labelValues := make(map[string]map[string]struct{})
 	for _, s := range series {
+		// Check for context cancellation in long-running loops
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		for label, value := range s {
 			labelName := string(label)
 			// Skip internal labels
@@ -197,12 +228,26 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 	return labels, nil
 }
 
+type rateLimitedTransport struct {
+	transport http.RoundTripper
+	limiter   *rate.Limiter
+}
+
+func (t *rateLimitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := t.limiter.Wait(req.Context()); err != nil {
+		return nil, err
+	}
+	return t.transport.RoundTrip(req)
+}
+
 type basicAuthTransport struct {
-	username string
-	password string
+	transport http.RoundTripper
+	username  string
+	password  string
 }
 
 func (t *basicAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
 	req.SetBasicAuth(t.username, t.password)
-	return http.DefaultTransport.RoundTrip(req)
+	return t.transport.RoundTrip(req)
 }

@@ -139,7 +139,10 @@ func (r *SnapshotsRepository) scanOne(row *sql.Row) (*models.Snapshot, error) {
 		return nil, err
 	}
 
-	s.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
+	s.CollectedAt, err = time.Parse(time.RFC3339, collectedAt)
+	if err != nil {
+		return nil, err
+	}
 	if scanDuration.Valid {
 		s.ScanDurationMs = int(scanDuration.Int64)
 	}
@@ -156,7 +159,10 @@ func (r *SnapshotsRepository) scanFromRows(rows *sql.Rows) (*models.Snapshot, er
 		return nil, err
 	}
 
-	s.CollectedAt, _ = time.Parse(time.RFC3339, collectedAt)
+	s.CollectedAt, err = time.Parse(time.RFC3339, collectedAt)
+	if err != nil {
+		return nil, err
+	}
 	if scanDuration.Valid {
 		s.ScanDurationMs = int(scanDuration.Int64)
 	}

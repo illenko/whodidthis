@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/illenko/whodidthis/models"
 )
@@ -78,17 +77,19 @@ func (r *ServicesRepository) List(ctx context.Context, snapshotID int64, opts Se
 		args = append(args, "%"+opts.Search+"%")
 	}
 
-	// Apply sorting
-	orderDir := "DESC"
-	if opts.Order == "asc" {
-		orderDir = "ASC"
-	}
-
 	switch opts.Sort {
 	case "name":
-		query += fmt.Sprintf(" ORDER BY service_name %s", orderDir)
+		if opts.Order == "asc" {
+			query += " ORDER BY service_name ASC"
+		} else {
+			query += " ORDER BY service_name DESC"
+		}
 	default:
-		query += fmt.Sprintf(" ORDER BY total_series %s", orderDir)
+		if opts.Order == "asc" {
+			query += " ORDER BY total_series ASC"
+		} else {
+			query += " ORDER BY total_series DESC"
+		}
 	}
 
 	rows, err := r.db.conn.QueryContext(ctx, query, args...)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/illenko/whodidthis/api"
 	"github.com/illenko/whodidthis/collector"
@@ -16,12 +17,6 @@ import (
 )
 
 func main() {
-	logLevel := slog.LevelInfo
-	if os.Getenv("DEBUG") == "true" {
-		logLevel = slog.LevelDebug
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
-
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "config.yaml"
@@ -32,6 +27,13 @@ func main() {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
+
+	// Configure logger from config, DEBUG env var overrides
+	logLevel := cfg.LogLevel()
+	if os.Getenv("DEBUG") == "true" {
+		logLevel = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
 
 	db, err := storage.New(cfg.Storage.Path)
 	if err != nil {
@@ -46,9 +48,11 @@ func main() {
 	labelsRepo := storage.NewLabelsRepository(db)
 
 	promClient, err := prometheus.NewClient(prometheus.Config{
-		URL:      cfg.Prometheus.URL,
-		Username: cfg.Prometheus.Username,
-		Password: cfg.Prometheus.Password,
+		URL:            cfg.Prometheus.URL,
+		Username:       cfg.Prometheus.Username,
+		Password:       cfg.Prometheus.Password,
+		RateLimit:      cfg.Prometheus.RateLimit,
+		RateLimitBurst: cfg.Prometheus.RateLimitBurst,
 	})
 	if err != nil {
 		slog.Error("failed to create prometheus client", "error", err)
@@ -65,16 +69,19 @@ func main() {
 	)
 
 	sched := scheduler.New(coll, scheduler.Config{
-		Interval: cfg.Scan.Interval,
+		Interval:  cfg.Scan.Interval,
+		Retention: cfg.RetentionDuration(),
+		DB:        db,
 	})
 
 	handlers := api.NewHandlers(api.HandlersConfig{
-		Snapshots: snapshotsRepo,
-		Services:  servicesRepo,
-		Metrics:   metricsRepo,
-		Labels:    labelsRepo,
-		Scheduler: sched,
-		DB:        db,
+		Snapshots:  snapshotsRepo,
+		Services:   servicesRepo,
+		Metrics:    metricsRepo,
+		Labels:     labelsRepo,
+		Scheduler:  sched,
+		DB:         db,
+		PromClient: promClient,
 	})
 
 	server := api.NewServer(handlers, api.ServerConfig{
@@ -94,7 +101,13 @@ func main() {
 		<-sigCh
 		slog.Info("shutting down...")
 		cancel()
-		server.Shutdown(context.Background())
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			slog.Error("server shutdown error", "error", err)
+		}
 	}()
 
 	if err := server.Start(); err != nil {

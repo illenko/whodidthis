@@ -5,36 +5,40 @@ import (
 	"strconv"
 
 	"github.com/illenko/whodidthis/models"
+	"github.com/illenko/whodidthis/prometheus"
 	"github.com/illenko/whodidthis/scheduler"
 	"github.com/illenko/whodidthis/storage"
 )
 
 type Handlers struct {
-	snapshots *storage.SnapshotsRepository
-	services  *storage.ServicesRepository
-	metrics   *storage.MetricsRepository
-	labels    *storage.LabelsRepository
-	scheduler *scheduler.Scheduler
-	db        *storage.DB
+	snapshots  *storage.SnapshotsRepository
+	services   *storage.ServicesRepository
+	metrics    *storage.MetricsRepository
+	labels     *storage.LabelsRepository
+	scheduler  *scheduler.Scheduler
+	db         *storage.DB
+	promClient *prometheus.Client
 }
 
 type HandlersConfig struct {
-	Snapshots *storage.SnapshotsRepository
-	Services  *storage.ServicesRepository
-	Metrics   *storage.MetricsRepository
-	Labels    *storage.LabelsRepository
-	Scheduler *scheduler.Scheduler
-	DB        *storage.DB
+	Snapshots  *storage.SnapshotsRepository
+	Services   *storage.ServicesRepository
+	Metrics    *storage.MetricsRepository
+	Labels     *storage.LabelsRepository
+	Scheduler  *scheduler.Scheduler
+	DB         *storage.DB
+	PromClient *prometheus.Client
 }
 
 func NewHandlers(cfg HandlersConfig) *Handlers {
 	return &Handlers{
-		snapshots: cfg.Snapshots,
-		services:  cfg.Services,
-		metrics:   cfg.Metrics,
-		labels:    cfg.Labels,
-		scheduler: cfg.Scheduler,
-		db:        cfg.DB,
+		snapshots:  cfg.Snapshots,
+		services:   cfg.Services,
+		metrics:    cfg.Metrics,
+		labels:     cfg.Labels,
+		scheduler:  cfg.Scheduler,
+		db:         cfg.DB,
+		promClient: cfg.PromClient,
 	}
 }
 
@@ -42,13 +46,23 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	status := models.HealthStatus{
-		Status:     "healthy",
-		DatabaseOK: true,
+		Status:              "healthy",
+		DatabaseOK:          true,
+		PrometheusConnected: true,
 	}
 
 	if _, err := h.db.Stats(ctx); err != nil {
 		status.Status = "unhealthy"
 		status.DatabaseOK = false
+	}
+
+	if h.promClient != nil {
+		if err := h.promClient.HealthCheck(ctx); err != nil {
+			status.PrometheusConnected = false
+			if status.Status == "healthy" {
+				status.Status = "degraded"
+			}
+		}
 	}
 
 	latest, _ := h.snapshots.GetLatest(ctx)

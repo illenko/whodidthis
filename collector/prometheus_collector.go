@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -19,6 +20,7 @@ type Collector struct {
 	labels       *storage.LabelsRepository
 	serviceLabel string
 	sampleLimit  int
+	logger       *slog.Logger
 }
 
 func NewCollector(
@@ -37,6 +39,7 @@ func NewCollector(
 		labels:       labels,
 		serviceLabel: cfg.Discovery.ServiceLabel,
 		sampleLimit:  cfg.Scan.SampleValuesLimit,
+		logger:       slog.Default(),
 	}
 }
 
@@ -50,7 +53,8 @@ type CollectResult struct {
 // ProgressCallback is called to report scan progress
 type ProgressCallback func(phase string, current, total int, detail string)
 
-func (c *Collector) Collect(ctx context.Context, progress ProgressCallback) (*CollectResult, error) {
+func (c *Collector) Collect(ctx context.Context, scanID int64, progress ProgressCallback) (*CollectResult, error) {
+	logger := c.logger.With("scan_id", scanID)
 	start := time.Now()
 	collectedAt := start.Truncate(time.Second)
 
@@ -58,7 +62,7 @@ func (c *Collector) Collect(ctx context.Context, progress ProgressCallback) (*Co
 		progress = func(string, int, int, string) {}
 	}
 
-	slog.Info("starting service discovery", "label", c.serviceLabel)
+	logger.Info("starting service discovery", "label", c.serviceLabel)
 	progress("discovering", 0, 0, "Discovering services...")
 
 	// Step 1: Create snapshot
@@ -77,7 +81,7 @@ func (c *Collector) Collect(ctx context.Context, progress ProgressCallback) (*Co
 		return nil, err
 	}
 
-	slog.Info("discovered services", "count", len(serviceInfos))
+	logger.Info("discovered services", "count", len(serviceInfos))
 
 	var totalSeries int64
 
@@ -88,11 +92,11 @@ func (c *Collector) Collect(ctx context.Context, progress ProgressCallback) (*Co
 		}
 
 		progress("scanning", i+1, len(serviceInfos), svc.Name)
-		slog.Info("scanning service", "name", svc.Name, "progress", i+1, "total", len(serviceInfos))
+		logger.Debug("scanning service", "name", svc.Name, "progress", i+1, "total", len(serviceInfos))
 
 		serviceSnapshot, err := c.collectService(ctx, snapshotID, svc)
 		if err != nil {
-			slog.Error("failed to collect service", "name", svc.Name, "error", err)
+			logger.Error("failed to collect service", "name", svc.Name, "error", err)
 			continue
 		}
 
@@ -109,7 +113,7 @@ func (c *Collector) Collect(ctx context.Context, progress ProgressCallback) (*Co
 	}
 
 	duration := time.Since(start)
-	slog.Info("collection complete",
+	logger.Info("collection complete",
 		"services", len(serviceInfos),
 		"total_series", totalSeries,
 		"duration", duration,
@@ -130,6 +134,12 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 		return nil, err
 	}
 
+	c.logger.Debug("found metrics for service",
+		"service", svc.Name,
+		"metrics", len(metricInfos),
+		"series", svc.SeriesCount,
+	)
+
 	// Create service snapshot
 	serviceSnapshot := &models.ServiceSnapshot{
 		SnapshotID:  snapshotID,
@@ -145,13 +155,20 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 	serviceSnapshot.ID = serviceSnapshotID
 
 	// Collect each metric
-	for _, metric := range metricInfos {
+	for i, metric := range metricInfos {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
+		c.logger.Debug("collecting metric",
+			"service", svc.Name,
+			"metric", metric.Name,
+			"progress", fmt.Sprintf("%d/%d", i+1, len(metricInfos)),
+			"series", metric.SeriesCount,
+		)
+
 		if err := c.collectMetric(ctx, serviceSnapshotID, svc.Name, metric); err != nil {
-			slog.Debug("failed to collect metric", "service", svc.Name, "metric", metric.Name, "error", err)
+			c.logger.Debug("failed to collect metric", "service", svc.Name, "metric", metric.Name, "error", err)
 			continue
 		}
 	}
@@ -164,8 +181,13 @@ func (c *Collector) collectMetric(ctx context.Context, serviceSnapshotID int64, 
 	labelInfos, err := c.client.GetLabelsForMetric(ctx, c.serviceLabel, serviceName, metric.Name, c.sampleLimit)
 	if err != nil {
 		// Log but don't fail - we can still store the metric without labels
-		slog.Debug("failed to get labels", "metric", metric.Name, "error", err)
+		c.logger.Debug("failed to get labels", "metric", metric.Name, "error", err)
 		labelInfos = nil
+	} else {
+		c.logger.Debug("collected labels",
+			"metric", metric.Name,
+			"labels", len(labelInfos),
+		)
 	}
 
 	// Create metric snapshot
@@ -181,18 +203,19 @@ func (c *Collector) collectMetric(ctx context.Context, serviceSnapshotID int64, 
 		return err
 	}
 
-	// Store labels
-	for _, label := range labelInfos {
-		labelSnapshot := &models.LabelSnapshot{
-			MetricSnapshotID:  metricSnapshotID,
-			LabelName:         label.Name,
-			UniqueValuesCount: label.UniqueValues,
-			SampleValues:      label.SampleValues,
+	if len(labelInfos) > 0 {
+		labelSnapshots := make([]*models.LabelSnapshot, 0, len(labelInfos))
+		for _, label := range labelInfos {
+			labelSnapshots = append(labelSnapshots, &models.LabelSnapshot{
+				MetricSnapshotID:  metricSnapshotID,
+				LabelName:         label.Name,
+				UniqueValuesCount: label.UniqueValues,
+				SampleValues:      label.SampleValues,
+			})
 		}
 
-		if _, err := c.labels.Create(ctx, labelSnapshot); err != nil {
-			slog.Debug("failed to store label", "label", label.Name, "error", err)
-			continue
+		if err := c.labels.CreateBatch(ctx, labelSnapshots); err != nil {
+			c.logger.Debug("failed to batch store labels", "metric", metric.Name, "error", err)
 		}
 	}
 

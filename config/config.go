@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -15,12 +16,15 @@ type Config struct {
 	Scan       ScanConfig       `mapstructure:"scan"`
 	Storage    StorageConfig    `mapstructure:"storage"`
 	Server     ServerConfig     `mapstructure:"server"`
+	Log        LogConfig        `mapstructure:"log"`
 }
 
 type PrometheusConfig struct {
-	URL      string `mapstructure:"url"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
+	URL            string  `mapstructure:"url"`
+	Username       string  `mapstructure:"username"`
+	Password       string  `mapstructure:"password"`
+	RateLimit      float64 `mapstructure:"rate_limit"`
+	RateLimitBurst int     `mapstructure:"rate_limit_burst"`
 }
 
 type DiscoveryConfig struct {
@@ -40,6 +44,10 @@ type StorageConfig struct {
 type ServerConfig struct {
 	Port int    `mapstructure:"port"`
 	Host string `mapstructure:"host"`
+}
+
+type LogConfig struct {
+	Level string `mapstructure:"level"` // debug, info, warn, error
 }
 
 func Load(path string) (*Config, error) {
@@ -79,6 +87,8 @@ func Load(path string) (*Config, error) {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("prometheus.url", "http://localhost:9090")
+	v.SetDefault("prometheus.rate_limit", 100.0)
+	v.SetDefault("prometheus.rate_limit_burst", 20)
 	v.SetDefault("discovery.service_label", "app")
 	v.SetDefault("scan.interval", "24h")
 	v.SetDefault("scan.sample_values_limit", 10)
@@ -86,12 +96,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.retention_days", 90)
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.host", "0.0.0.0")
+	v.SetDefault("log.level", "info")
 }
 
 func defaultConfig() *Config {
 	return &Config{
 		Prometheus: PrometheusConfig{
-			URL: "http://localhost:9090",
+			URL:            "http://localhost:9090",
+			RateLimit:      100.0,
+			RateLimitBurst: 20,
 		},
 		Discovery: DiscoveryConfig{
 			ServiceLabel: "app",
@@ -107,6 +120,9 @@ func defaultConfig() *Config {
 		Server: ServerConfig{
 			Port: 8080,
 			Host: "0.0.0.0",
+		},
+		Log: LogConfig{
+			Level: "info",
 		},
 	}
 }
@@ -126,6 +142,19 @@ func (c *Config) Validate() error {
 
 func (c *Config) RetentionDuration() time.Duration {
 	return time.Duration(c.Storage.RetentionDays) * 24 * time.Hour
+}
+
+func (c *Config) LogLevel() slog.Level {
+	switch c.Log.Level {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 func ConfigFileExists(path string) bool {

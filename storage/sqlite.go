@@ -24,6 +24,10 @@ func New(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	conn.SetMaxOpenConns(1)
+	conn.SetMaxIdleConns(1)
+	conn.SetConnMaxLifetime(0)
+
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",

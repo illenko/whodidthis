@@ -79,34 +79,53 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
 }
 
+const requestTimeout = 30 * time.Second
+
+// statusWriter wraps http.ResponseWriter to capture the status code
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
 func withMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 
 		// Recovery
 		defer func() {
 			if err := recover(); err != nil {
 				slog.Error("panic recovered", "error", err)
-				writeError(w, http.StatusInternalServerError, "internal server error")
+				writeError(sw, http.StatusInternalServerError, "internal server error")
 			}
 		}()
 
 		// CORS
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		sw.Header().Set("Access-Control-Allow-Origin", "*")
+		sw.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		sw.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
+			sw.WriteHeader(http.StatusOK)
 			return
 		}
 
-		// Logging
-		next.ServeHTTP(w, r)
+		// Request timeout
+		ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+		defer cancel()
+
+		next.ServeHTTP(sw, r.WithContext(ctx))
 
 		slog.Debug("request completed",
 			"method", r.Method,
 			"path", r.URL.Path,
+			"status", sw.status,
 			"duration", time.Since(start),
 		)
 	})

@@ -55,7 +55,10 @@ func (r *LabelsRepository) CreateBatch(ctx context.Context, labels []*models.Lab
 	defer stmt.Close()
 
 	for _, l := range labels {
-		sampleJSON, _ := json.Marshal(l.SampleValues)
+		sampleJSON, err := json.Marshal(l.SampleValues)
+		if err != nil {
+			return err
+		}
 		_, err = stmt.ExecContext(ctx, l.MetricSnapshotID, l.LabelName, l.UniqueValuesCount, string(sampleJSON))
 		if err != nil {
 			return err
@@ -107,7 +110,9 @@ func (r *LabelsRepository) GetByName(ctx context.Context, metricSnapshotID int64
 		return nil, err
 	}
 	if sampleJSON.Valid && sampleJSON.String != "" {
-		json.Unmarshal([]byte(sampleJSON.String), &l.SampleValues)
+		if err := json.Unmarshal([]byte(sampleJSON.String), &l.SampleValues); err != nil {
+			return nil, err
+		}
 	}
 	return &l, nil
 }
@@ -122,7 +127,9 @@ func (r *LabelsRepository) scanFromRows(rows *sql.Rows) (*models.LabelSnapshot, 
 	}
 
 	if sampleJSON.Valid && sampleJSON.String != "" {
-		json.Unmarshal([]byte(sampleJSON.String), &l.SampleValues)
+		if err := json.Unmarshal([]byte(sampleJSON.String), &l.SampleValues); err != nil {
+			return nil, err
+		}
 	}
 	return &l, nil
 }

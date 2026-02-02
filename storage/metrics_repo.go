@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/illenko/whodidthis/models"
 )
@@ -71,16 +70,19 @@ func (r *MetricsRepository) List(ctx context.Context, serviceSnapshotID int64, o
 		WHERE service_snapshot_id = ?
 	`
 
-	orderDir := "DESC"
-	if opts.Order == "asc" {
-		orderDir = "ASC"
-	}
-
 	switch opts.Sort {
 	case "name":
-		query += fmt.Sprintf(" ORDER BY metric_name %s", orderDir)
+		if opts.Order == "asc" {
+			query += " ORDER BY metric_name ASC"
+		} else {
+			query += " ORDER BY metric_name DESC"
+		}
 	default:
-		query += fmt.Sprintf(" ORDER BY series_count %s", orderDir)
+		if opts.Order == "asc" {
+			query += " ORDER BY series_count ASC"
+		} else {
+			query += " ORDER BY series_count DESC"
+		}
 	}
 
 	rows, err := r.db.conn.QueryContext(ctx, query, serviceSnapshotID)

@@ -43,3 +43,5 @@ web/dist/
 /api/dist/
 /whodidthis.db-shm
 /whodidthis.db-wal
+/docker-compose.yml
+/Dockerfile

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -52,7 +51,6 @@ type LogConfig struct {
 
 func Load(path string) (*Config, error) {
 	v := viper.New()
-	setDefaults(v)
 
 	if path != "" {
 		v.SetConfigFile(path)
@@ -62,15 +60,13 @@ func Load(path string) (*Config, error) {
 		v.AddConfigPath(".")
 	}
 
-	v.SetEnvPrefix("whodidthis")
+	v.SetEnvPrefix("WDT")
 	v.AutomaticEnv()
 
 	if err := v.ReadInConfig(); err != nil {
-		var configFileNotFoundError viper.ConfigFileNotFoundError
-		if errors.As(err, &configFileNotFoundError) {
-			return defaultConfig(), nil
-		}
-		return nil, fmt.Errorf("failed to read config: %w", err)
+		fmt.Println("Error reading config:", err)
+		fmt.Println("Building config from env")
+		return envConfig(v), nil
 	}
 
 	var cfg Config
@@ -85,44 +81,30 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func setDefaults(v *viper.Viper) {
-	v.SetDefault("prometheus.url", "http://localhost:9090")
-	v.SetDefault("prometheus.rate_limit", 100.0)
-	v.SetDefault("prometheus.rate_limit_burst", 20)
-	v.SetDefault("discovery.service_label", "app")
-	v.SetDefault("scan.interval", "24h")
-	v.SetDefault("scan.sample_values_limit", 10)
-	v.SetDefault("storage.path", "./data/metrics-audit.db")
-	v.SetDefault("storage.retention_days", 90)
-	v.SetDefault("server.port", 8080)
-	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("log.level", "info")
-}
-
-func defaultConfig() *Config {
+func envConfig(v *viper.Viper) *Config {
 	return &Config{
 		Prometheus: PrometheusConfig{
-			URL:            "http://localhost:9090",
-			RateLimit:      100.0,
-			RateLimitBurst: 20,
+			URL:            v.GetString("prometheus_url"),
+			RateLimit:      v.GetFloat64("prometheus_rate_limit"),
+			RateLimitBurst: v.GetInt("prometheus_rate_limit_burst"),
 		},
 		Discovery: DiscoveryConfig{
-			ServiceLabel: "app",
+			ServiceLabel: v.GetString("discovery_service_label"),
 		},
 		Scan: ScanConfig{
-			Interval:          24 * time.Hour,
-			SampleValuesLimit: 10,
+			Interval:          v.GetDuration("scan_interval"),
+			SampleValuesLimit: v.GetInt("scan_sample_values_limit"),
 		},
 		Storage: StorageConfig{
-			Path:          "./data/metrics-audit.db",
-			RetentionDays: 90,
+			Path:          v.GetString("storage_path"),
+			RetentionDays: v.GetInt("storage_retention_days"),
 		},
 		Server: ServerConfig{
-			Port: 8080,
-			Host: "0.0.0.0",
+			Port: v.GetInt("server_port"),
+			Host: v.GetString("server_host"),
 		},
 		Log: LogConfig{
-			Level: "info",
+			Level: v.GetString("log_level"),
 		},
 	}
 }

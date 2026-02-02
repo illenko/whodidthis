@@ -1,4 +1,4 @@
-const BASE_URL = '/api'
+import { API_BASE_URL, DEFAULT_SCANS_LIMIT } from './lib/constants'
 
 // Core types matching backend models
 export interface Scan {
@@ -53,24 +53,32 @@ export interface HealthStatus {
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
-    if (res.status === 404) return null as T
-    throw new Error(`HTTP ${res.status}`)
+    throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+  }
+  return res.json()
+}
+
+async function fetchJSONOrNull<T>(url: string): Promise<T | null> {
+  const res = await fetch(url)
+  if (!res.ok) {
+    if (res.status === 404) return null
+    throw new Error(`HTTP ${res.status}: ${res.statusText}`)
   }
   return res.json()
 }
 
 export const api = {
   // Health
-  getHealth: () => fetchJSON<HealthStatus>(`${BASE_URL}/../health`),
+  getHealth: () => fetchJSON<HealthStatus>(`${API_BASE_URL}/../health`),
 
   // Scan control
-  getScanStatus: () => fetchJSON<ScanStatus>(`${BASE_URL}/scan/status`),
-  triggerScan: () => fetch(`${BASE_URL}/scan`, { method: 'POST' }),
+  getScanStatus: () => fetchJSON<ScanStatus>(`${API_BASE_URL}/scan/status`),
+  triggerScan: () => fetch(`${API_BASE_URL}/scan`, { method: 'POST' }),
 
   // Scans (snapshots)
-  getScans: (limit = 100) => fetchJSON<Scan[]>(`${BASE_URL}/scans?limit=${limit}`),
-  getLatestScan: () => fetchJSON<Scan | null>(`${BASE_URL}/scans/latest`),
-  getScan: (id: number) => fetchJSON<Scan>(`${BASE_URL}/scans/${id}`),
+  getScans: (limit = DEFAULT_SCANS_LIMIT) => fetchJSON<Scan[]>(`${API_BASE_URL}/scans?limit=${limit}`),
+  getLatestScan: () => fetchJSONOrNull<Scan>(`${API_BASE_URL}/scans/latest`),
+  getScan: (id: number) => fetchJSON<Scan>(`${API_BASE_URL}/scans/${id}`),
 
   // Services (within a scan)
   getServices: (scanId: number, params?: { sort?: string; order?: string; search?: string }) => {
@@ -79,10 +87,10 @@ export const api = {
     if (params?.order) query.set('order', params.order)
     if (params?.search) query.set('search', params.search)
     const qs = query.toString()
-    return fetchJSON<Service[]>(`${BASE_URL}/scans/${scanId}/services${qs ? '?' + qs : ''}`)
+    return fetchJSON<Service[]>(`${API_BASE_URL}/scans/${scanId}/services${qs ? '?' + qs : ''}`)
   },
   getService: (scanId: number, serviceName: string) =>
-    fetchJSON<Service>(`${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}`),
+    fetchJSON<Service>(`${API_BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}`),
 
   // Metrics (within a service)
   getMetrics: (scanId: number, serviceName: string, params?: { sort?: string; order?: string }) => {
@@ -91,17 +99,17 @@ export const api = {
     if (params?.order) query.set('order', params.order)
     const qs = query.toString()
     return fetchJSON<Metric[]>(
-      `${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics${qs ? '?' + qs : ''}`
+      `${API_BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics${qs ? '?' + qs : ''}`
     )
   },
   getMetric: (scanId: number, serviceName: string, metricName: string) =>
     fetchJSON<Metric>(
-      `${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}`
+      `${API_BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}`
     ),
 
   // Labels (within a metric)
   getLabels: (scanId: number, serviceName: string, metricName: string) =>
     fetchJSON<Label[]>(
-      `${BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}/labels`
+      `${API_BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}/labels`
     ),
 }

@@ -3,8 +3,11 @@ import { api } from '../api'
 import type { Scan, Service } from '../api'
 import { navigate } from '../lib/router'
 import { formatNumber, formatDate } from '../lib/format'
+import { useDebounce } from '../hooks/useDebounce'
 import { DataTable, type Column } from '../components/DataTable'
 import { Loading, EmptyState } from '../components/Loading'
+import { Input } from '../components/Input'
+import { Select } from '../components/Select'
 
 export function ScansPage() {
   const [scans, setScans] = useState<Scan[]>([])
@@ -12,6 +15,7 @@ export function ScansPage() {
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
 
   // Load all scans and select the latest one
   useEffect(() => {
@@ -23,24 +27,24 @@ export function ScansPage() {
         if (scansData && scansData.length > 0) {
           setSelectedScanId(scansData[0].id) // Latest scan is first
         }
-      } catch (e) {
-        console.error(e)
+      } catch (err) {
+        console.error('Failed to load scans:', err)
       }
       setLoading(false)
     }
     loadInitial()
   }, [])
 
-  // Load services when scan changes
+  // Load services when scan or debounced search changes
   const loadServices = useCallback(async () => {
     if (!selectedScanId) return
     try {
-      const data = await api.getServices(selectedScanId, { search: search || undefined })
+      const data = await api.getServices(selectedScanId, { search: debouncedSearch || undefined })
       setServices(data || [])
-    } catch (e) {
-      console.error(e)
+    } catch (err) {
+      console.error('Failed to load services:', err)
     }
-  }, [selectedScanId, search])
+  }, [selectedScanId, debouncedSearch])
 
   useEffect(() => {
     if (selectedScanId) {
@@ -63,19 +67,19 @@ export function ScansPage() {
     {
       key: 'name',
       header: 'Service',
-      render: (svc) => <span className="font-mono text-gray-900">{svc.name}</span>,
+      render: (svc) => <span className="font-mono text-gray-900 dark:text-gray-100">{svc.name}</span>,
     },
     {
       key: 'series',
       header: 'Series',
       align: 'right',
-      render: (svc) => <span className="text-gray-600">{formatNumber(svc.total_series)}</span>,
+      render: (svc) => <span className="text-gray-600 dark:text-gray-400">{formatNumber(svc.total_series)}</span>,
     },
     {
       key: 'metrics',
       header: 'Metrics',
       align: 'right',
-      render: (svc) => <span className="text-gray-500">{svc.metric_count}</span>,
+      render: (svc) => <span className="text-gray-500 dark:text-gray-500">{svc.metric_count}</span>,
     },
   ]
 
@@ -87,29 +91,30 @@ export function ScansPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <select
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          <Select
             value={selectedScanId || ''}
             onChange={(e) => setSelectedScanId(Number(e.target.value))}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 bg-white"
+            aria-label="Select snapshot"
           >
             {scans.map((scan) => (
               <option key={scan.id} value={scan.id}>
                 Snapshot #{scan.id} — {formatDate(scan.collected_at)}
               </option>
             ))}
-          </select>
-          <span className="text-sm text-gray-500">
+          </Select>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
             {formatNumber(services.length)} services · {formatNumber(services.reduce((sum, s) => sum + s.total_series, 0))} total series
           </span>
         </div>
-        <input
+        <Input
           type="text"
           placeholder="Search services..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 w-64"
+          className="w-64"
+          aria-label="Search services"
         />
       </div>
 

@@ -3,9 +3,12 @@ import { api } from '../api'
 import type { Scan, Metric, Label } from '../api'
 import { navigate } from '../lib/router'
 import { formatNumber, formatDate } from '../lib/format'
+import { useDebounce } from '../hooks/useDebounce'
 import { DataTable, type Column } from '../components/DataTable'
 import { Breadcrumb } from '../components/Breadcrumb'
 import { Loading } from '../components/Loading'
+import { Input } from '../components/Input'
+import { Select } from '../components/Select'
 
 interface LabelsPageProps {
   scanId: number
@@ -20,6 +23,7 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
   const [labels, setLabels] = useState<Label[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
 
   // Load all scans for dropdown
   useEffect(() => {
@@ -27,8 +31,8 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
       try {
         const data = await api.getScans()
         setScans(data || [])
-      } catch (e) {
-        console.error(e)
+      } catch (err) {
+        console.error('Failed to load scans:', err)
       }
     }
     loadScans()
@@ -45,8 +49,8 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
         ])
         setMetric(metricData)
         setLabels(labelsData || [])
-      } catch (e) {
-        console.error(e)
+      } catch (err) {
+        console.error('Failed to load labels:', err)
       }
       setLoading(false)
     }
@@ -62,10 +66,10 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
 
   // Filter labels by search
   const filteredLabels = useMemo(() => {
-    if (!search) return labels
-    const lower = search.toLowerCase()
+    if (!debouncedSearch) return labels
+    const lower = debouncedSearch.toLowerCase()
     return labels.filter(l => l.name.toLowerCase().includes(lower))
-  }, [labels, search])
+  }, [labels, debouncedSearch])
 
   if (loading) return <Loading />
 
@@ -73,13 +77,13 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
     {
       key: 'name',
       header: 'Label',
-      render: (l) => <span className="font-mono text-gray-900">{l.name}</span>,
+      render: (l) => <span className="font-mono text-gray-900 dark:text-gray-100">{l.name}</span>,
     },
     {
       key: 'unique',
       header: 'Unique Values',
       align: 'right',
-      render: (l) => <span className="text-gray-600">{formatNumber(l.unique_values)}</span>,
+      render: (l) => <span className="text-gray-600 dark:text-gray-400">{formatNumber(l.unique_values)}</span>,
     },
     {
       key: 'samples',
@@ -98,29 +102,30 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
         ]}
       />
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <select
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          <Select
             value={selectedScanId}
             onChange={(e) => setSelectedScanId(Number(e.target.value))}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 bg-white"
+            aria-label="Select snapshot"
           >
             {scans.map((scan) => (
               <option key={scan.id} value={scan.id}>
                 Snapshot #{scan.id} — {formatDate(scan.collected_at)}
               </option>
             ))}
-          </select>
-          <span className="text-sm text-gray-500">
+          </Select>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
             {metric ? formatNumber(metric.series_count) : '–'} series · {formatNumber(filteredLabels.length)} labels
           </span>
         </div>
-        <input
+        <Input
           type="text"
           placeholder="Search labels..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 w-64"
+          className="w-64"
+          aria-label="Search labels"
         />
       </div>
 
@@ -135,13 +140,13 @@ export function LabelsPage({ scanId, serviceName, metricName }: LabelsPageProps)
 
 function SampleValues({ values }: { values?: string[] }) {
   if (!values || values.length === 0) {
-    return <span className="text-gray-400">–</span>
+    return <span className="text-gray-400 dark:text-gray-600">–</span>
   }
 
   return (
     <div className="flex flex-wrap gap-1">
       {values.map((v, i) => (
-        <span key={i} className="px-2 py-0.5 bg-gray-100 rounded text-xs font-mono">
+        <span key={i} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-xs font-mono">
           {v}
         </span>
       ))}

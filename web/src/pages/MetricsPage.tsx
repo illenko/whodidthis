@@ -1,11 +1,14 @@
 import { useEffect, useState, useMemo } from 'react'
 import { api } from '../api'
-import type { Scan, Service, Metric } from '../api'
+import type { Scan, Metric } from '../api'
 import { navigate } from '../lib/router'
 import { formatNumber, formatDate } from '../lib/format'
+import { useDebounce } from '../hooks/useDebounce'
 import { DataTable, type Column } from '../components/DataTable'
 import { Breadcrumb } from '../components/Breadcrumb'
 import { Loading } from '../components/Loading'
+import { Input } from '../components/Input'
+import { Select } from '../components/Select'
 
 interface MetricsPageProps {
   scanId: number
@@ -15,10 +18,10 @@ interface MetricsPageProps {
 export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
   const [scans, setScans] = useState<Scan[]>([])
   const [selectedScanId, setSelectedScanId] = useState<number>(scanId)
-  const [_, setService] = useState<Service | null>(null)
   const [metrics, setMetrics] = useState<Metric[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
 
   // Load all scans for dropdown
   useEffect(() => {
@@ -26,8 +29,8 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
       try {
         const data = await api.getScans()
         setScans(data || [])
-      } catch (e) {
-        console.error(e)
+      } catch (err) {
+        console.error('Failed to load scans:', err)
       }
     }
     loadScans()
@@ -38,14 +41,10 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
     async function load() {
       setLoading(true)
       try {
-        const [serviceData, metricsData] = await Promise.all([
-          api.getService(selectedScanId, serviceName),
-          api.getMetrics(selectedScanId, serviceName),
-        ])
-        setService(serviceData)
+        const metricsData = await api.getMetrics(selectedScanId, serviceName)
         setMetrics(metricsData || [])
-      } catch (e) {
-        console.error(e)
+      } catch (err) {
+        console.error('Failed to load metrics:', err)
       }
       setLoading(false)
     }
@@ -61,10 +60,10 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
 
   // Filter metrics by search
   const filteredMetrics = useMemo(() => {
-    if (!search) return metrics
-    const lower = search.toLowerCase()
+    if (!debouncedSearch) return metrics
+    const lower = debouncedSearch.toLowerCase()
     return metrics.filter(m => m.name.toLowerCase().includes(lower))
-  }, [metrics, search])
+  }, [metrics, debouncedSearch])
 
   if (loading) return <Loading />
 
@@ -72,19 +71,19 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
     {
       key: 'name',
       header: 'Metric',
-      render: (m) => <span className="font-mono text-gray-900">{m.name}</span>,
+      render: (m) => <span className="font-mono text-gray-900 dark:text-gray-100">{m.name}</span>,
     },
     {
       key: 'series',
       header: 'Series',
       align: 'right',
-      render: (m) => <span className="text-gray-600">{formatNumber(m.series_count)}</span>,
+      render: (m) => <span className="text-gray-600 dark:text-gray-400">{formatNumber(m.series_count)}</span>,
     },
     {
       key: 'labels',
       header: 'Labels',
       align: 'right',
-      render: (m) => <span className="text-gray-500">{m.label_count}</span>,
+      render: (m) => <span className="text-gray-500 dark:text-gray-500">{m.label_count}</span>,
     },
   ]
 
@@ -101,29 +100,30 @@ export function MetricsPage({ scanId, serviceName }: MetricsPageProps) {
         ]}
       />
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <select
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          <Select
             value={selectedScanId}
             onChange={(e) => setSelectedScanId(Number(e.target.value))}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 bg-white"
+            aria-label="Select snapshot"
           >
             {scans.map((scan) => (
               <option key={scan.id} value={scan.id}>
                 Snapshot #{scan.id} — {formatDate(scan.collected_at)}
               </option>
             ))}
-          </select>
-          <span className="text-sm text-gray-500">
+          </Select>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
             {formatNumber(filteredMetrics.length)} metrics · {formatNumber(filteredMetrics.reduce((sum, m) => sum + m.series_count, 0))} series
           </span>
         </div>
-        <input
+        <Input
           type="text"
           placeholder="Search metrics..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200 w-64"
+          className="w-64"
+          aria-label="Search metrics"
         />
       </div>
 

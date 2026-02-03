@@ -8,71 +8,6 @@ import (
 	"github.com/illenko/whodidthis/storage"
 )
 
-var toolDefinitions = []FunctionDeclaration{
-	{
-		Name:        "get_service_metrics",
-		Description: "Get all metrics for a specific service in a snapshot. Returns the complete list of metrics with their series counts. Only accepts snapshot_id and service_name parameters.",
-		Parameters: &FunctionParams{
-			Type: "object",
-			Properties: map[string]PropertySchema{
-				"snapshot_id": {
-					Type:        "integer",
-					Description: "ID of the snapshot (use the snapshot IDs from the prompt)",
-				},
-				"service_name": {
-					Type:        "string",
-					Description: "Exact name of the service as listed in the snapshot",
-				},
-			},
-			Required: []string{"snapshot_id", "service_name"},
-		},
-	},
-	{
-		Name:        "get_metric_labels",
-		Description: "Get label details for a specific metric in a service. Returns label names with their unique value counts and sample values. Only accepts snapshot_id, service_name, and metric_name parameters.",
-		Parameters: &FunctionParams{
-			Type: "object",
-			Properties: map[string]PropertySchema{
-				"snapshot_id": {
-					Type:        "integer",
-					Description: "ID of the snapshot (use the snapshot IDs from the prompt)",
-				},
-				"service_name": {
-					Type:        "string",
-					Description: "Exact name of the service as listed in the snapshot",
-				},
-				"metric_name": {
-					Type:        "string",
-					Description: "Exact name of the metric (get metric names from get_service_metrics first)",
-				},
-			},
-			Required: []string{"snapshot_id", "service_name", "metric_name"},
-		},
-	},
-	{
-		Name:        "compare_services",
-		Description: "Compare a service's metrics between two snapshots. Returns only metrics that changed (new, removed, or different series count) with change percentages. Unchanged metrics are counted but omitted to keep the response compact. Only accepts current_snapshot_id, previous_snapshot_id, and service_name parameters.",
-		Parameters: &FunctionParams{
-			Type: "object",
-			Properties: map[string]PropertySchema{
-				"current_snapshot_id": {
-					Type:        "integer",
-					Description: "ID of the current/newer snapshot (from the prompt)",
-				},
-				"previous_snapshot_id": {
-					Type:        "integer",
-					Description: "ID of the previous/older snapshot (from the prompt)",
-				},
-				"service_name": {
-					Type:        "string",
-					Description: "Exact name of the service to compare",
-				},
-			},
-			Required: []string{"current_snapshot_id", "previous_snapshot_id", "service_name"},
-		},
-	},
-}
-
 type ToolExecutor struct {
 	services *storage.ServicesRepository
 	metrics  *storage.MetricsRepository
@@ -87,16 +22,16 @@ func NewToolExecutor(services *storage.ServicesRepository, metrics *storage.Metr
 	}
 }
 
-func (e *ToolExecutor) Execute(ctx context.Context, call *FunctionCall) (any, error) {
-	switch call.Name {
+func (e *ToolExecutor) Execute(ctx context.Context, toolName string, args map[string]any) (any, error) {
+	switch toolName {
 	case "get_service_metrics":
-		return e.getServiceMetrics(ctx, call.Args)
+		return e.getServiceMetrics(ctx, args)
 	case "get_metric_labels":
-		return e.getMetricLabels(ctx, call.Args)
+		return e.getMetricLabels(ctx, args)
 	case "compare_services":
-		return e.compareServices(ctx, call.Args)
+		return e.compareServices(ctx, args)
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", call.Name)
+		return nil, fmt.Errorf("unknown tool: %s", toolName)
 	}
 }
 
@@ -283,7 +218,6 @@ func (e *ToolExecutor) compareServices(ctx context.Context, args map[string]any)
 		previousMap[m.MetricName] = m.SeriesCount
 	}
 
-	// Find all metric names
 	allMetrics := make(map[string]bool)
 	for name := range currentMap {
 		allMetrics[name] = true
@@ -292,7 +226,6 @@ func (e *ToolExecutor) compareServices(ctx context.Context, args map[string]any)
 		allMetrics[name] = true
 	}
 
-	// Calculate changes - only include metrics that actually changed
 	for name := range allMetrics {
 		current := currentMap[name]
 		previous := previousMap[name]

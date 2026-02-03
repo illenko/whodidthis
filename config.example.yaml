@@ -2,8 +2,6 @@ prometheus:
   url: http://localhost:8428
   # username: ""
   # password: ""
-  rate_limit: 100       # requests per second (default: 100)
-  rate_limit_burst: 20  # burst size (default: 20)
 
 discovery:
   service_label: job  # Label used to identify services (e.g., "app", "service", "job")
@@ -11,6 +9,7 @@ discovery:
 scan:
   interval: 1m
   sample_values_limit: 10  # Max sample values to store per label
+  concurrency: 10          # Max concurrent HTTP requests during scan (default: 10)
 
 storage:
   path: whodidthis.db

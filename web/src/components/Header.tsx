@@ -17,7 +17,7 @@ export function Header() {
             className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
             aria-label="Scans"
           >
-            📡 Scans
+            🔍 Scans
           </button>
           <button
             onClick={() => navigate({ page: 'analysis' })}

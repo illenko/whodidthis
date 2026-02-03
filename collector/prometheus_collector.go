@@ -2,8 +2,9 @@ package collector
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/illenko/whodidthis/config"
@@ -20,6 +21,7 @@ type Collector struct {
 	labels       *storage.LabelsRepository
 	serviceLabel string
 	sampleLimit  int
+	concurrency  int
 	logger       *slog.Logger
 }
 
@@ -39,6 +41,7 @@ func NewCollector(
 		labels:       labels,
 		serviceLabel: cfg.Discovery.ServiceLabel,
 		sampleLimit:  cfg.Scan.SampleValuesLimit,
+		concurrency:  cfg.Scan.Concurrency,
 		logger:       slog.Default(),
 	}
 }
@@ -50,7 +53,6 @@ type CollectResult struct {
 	Duration      time.Duration
 }
 
-// ProgressCallback is called to report scan progress
 type ProgressCallback func(phase string, current, total int, detail string)
 
 func (c *Collector) Collect(ctx context.Context, scanID int64, progress ProgressCallback) (*CollectResult, error) {
@@ -65,7 +67,6 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 	logger.Info("starting service discovery", "label", c.serviceLabel)
 	progress("discovering", 0, 0, "Discovering services...")
 
-	// Step 1: Create snapshot
 	snapshot := &models.Snapshot{
 		CollectedAt: collectedAt,
 	}
@@ -75,7 +76,6 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 	}
 	snapshot.ID = snapshotID
 
-	// Step 2: Discover services
 	serviceInfos, err := c.client.DiscoverServices(ctx, c.serviceLabel)
 	if err != nil {
 		return nil, err
@@ -83,29 +83,56 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 
 	logger.Info("discovered services", "count", len(serviceInfos))
 
-	var totalSeries int64
+	var totalSeries atomic.Int64
 
-	// Step 3: For each service, collect metrics and labels
-	for i, svc := range serviceInfos {
+	sem := make(chan struct{}, c.concurrency)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	completed := 0
+
+	for _, svc := range serviceInfos {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			break
 		}
 
-		progress("scanning", i+1, len(serviceInfos), svc.Name)
-		logger.Debug("scanning service", "name", svc.Name, "progress", i+1, "total", len(serviceInfos))
+		wg.Add(1)
+		go func(svc prometheus.ServiceInfo) {
+			defer wg.Done()
 
-		serviceSnapshot, err := c.collectService(ctx, snapshotID, svc)
-		if err != nil {
-			logger.Error("failed to collect service", "name", svc.Name, "error", err)
-			continue
-		}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 
-		totalSeries += int64(serviceSnapshot.TotalSeries)
+			logger.Debug("scanning service", "name", svc.Name)
+
+			mu.Lock()
+			progress("processing_service", completed, len(serviceInfos), svc.Name)
+			mu.Unlock()
+
+			// collectService always releases the sem slot internally
+			serviceSnapshot, err := c.collectService(ctx, snapshotID, svc, sem, progress)
+
+			mu.Lock()
+			completed++
+			progress("service_complete", completed, len(serviceInfos), svc.Name)
+			mu.Unlock()
+
+			if err != nil {
+				logger.Error("failed to collect service", "name", svc.Name, "error", err)
+				return
+			}
+
+			totalSeries.Add(int64(serviceSnapshot.TotalSeries))
+		}(svc)
 	}
 
-	// Step 4: Update snapshot with totals
+	wg.Wait()
+
+	finalTotalSeries := totalSeries.Load()
 	snapshot.TotalServices = len(serviceInfos)
-	snapshot.TotalSeries = totalSeries
+	snapshot.TotalSeries = finalTotalSeries
 	snapshot.ScanDurationMs = int(time.Since(start).Milliseconds())
 
 	if err := c.snapshots.Update(ctx, snapshot); err != nil {
@@ -115,22 +142,22 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 	duration := time.Since(start)
 	logger.Info("collection complete",
 		"services", len(serviceInfos),
-		"total_series", totalSeries,
+		"total_series", finalTotalSeries,
 		"duration", duration,
 	)
 
 	return &CollectResult{
 		SnapshotID:    snapshotID,
 		TotalServices: len(serviceInfos),
-		TotalSeries:   totalSeries,
+		TotalSeries:   finalTotalSeries,
 		Duration:      duration,
 	}, nil
 }
 
-func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc prometheus.ServiceInfo) (*models.ServiceSnapshot, error) {
-	// Get metrics for this service
+func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc prometheus.ServiceInfo, sem chan struct{}, progress ProgressCallback) (*models.ServiceSnapshot, error) {
 	metricInfos, err := c.client.GetMetricsForService(ctx, c.serviceLabel, svc.Name)
 	if err != nil {
+		<-sem
 		return nil, err
 	}
 
@@ -140,7 +167,8 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 		"series", svc.SeriesCount,
 	)
 
-	// Create service snapshot
+	progress("collecting_labels", len(metricInfos), int(svc.SeriesCount), svc.Name)
+
 	serviceSnapshot := &models.ServiceSnapshot{
 		SnapshotID:  snapshotID,
 		ServiceName: svc.Name,
@@ -150,37 +178,50 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 
 	serviceSnapshotID, err := c.services.Create(ctx, serviceSnapshot)
 	if err != nil {
+		<-sem
 		return nil, err
 	}
 	serviceSnapshot.ID = serviceSnapshotID
 
-	// Collect each metric
-	for i, metric := range metricInfos {
+	<-sem
+
+	var metricWg sync.WaitGroup
+	for _, metric := range metricInfos {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			break
 		}
 
-		c.logger.Debug("collecting metric",
-			"service", svc.Name,
-			"metric", metric.Name,
-			"progress", fmt.Sprintf("%d/%d", i+1, len(metricInfos)),
-			"series", metric.SeriesCount,
-		)
+		metricWg.Add(1)
+		go func(metric prometheus.MetricInfo) {
+			defer metricWg.Done()
 
-		if err := c.collectMetric(ctx, serviceSnapshotID, svc.Name, metric); err != nil {
-			c.logger.Debug("failed to collect metric", "service", svc.Name, "metric", metric.Name, "error", err)
-			continue
-		}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			c.logger.Debug("collecting metric",
+				"service", svc.Name,
+				"metric", metric.Name,
+				"series", metric.SeriesCount,
+			)
+
+			if err := c.collectMetric(ctx, serviceSnapshotID, svc.Name, metric); err != nil {
+				c.logger.Debug("failed to collect metric", "service", svc.Name, "metric", metric.Name, "error", err)
+			}
+		}(metric)
 	}
+
+	metricWg.Wait()
 
 	return serviceSnapshot, nil
 }
 
 func (c *Collector) collectMetric(ctx context.Context, serviceSnapshotID int64, serviceName string, metric prometheus.MetricInfo) error {
-	// Get labels for this metric
 	labelInfos, err := c.client.GetLabelsForMetric(ctx, c.serviceLabel, serviceName, metric.Name, c.sampleLimit)
 	if err != nil {
-		// Log but don't fail - we can still store the metric without labels
 		c.logger.Debug("failed to get labels", "metric", metric.Name, "error", err)
 		labelInfos = nil
 	} else {
@@ -190,7 +231,6 @@ func (c *Collector) collectMetric(ctx context.Context, serviceSnapshotID int64, 
 		)
 	}
 
-	// Create metric snapshot
 	metricSnapshot := &models.MetricSnapshot{
 		ServiceSnapshotID: serviceSnapshotID,
 		MetricName:        metric.Name,

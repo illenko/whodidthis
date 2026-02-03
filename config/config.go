@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/spf13/viper"
@@ -20,11 +19,9 @@ type Config struct {
 }
 
 type PrometheusConfig struct {
-	URL            string  `mapstructure:"url"`
-	Username       string  `mapstructure:"username"`
-	Password       string  `mapstructure:"password"`
-	RateLimit      float64 `mapstructure:"rate_limit"`
-	RateLimitBurst int     `mapstructure:"rate_limit_burst"`
+	URL      string `mapstructure:"url"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
 }
 
 type DiscoveryConfig struct {
@@ -34,6 +31,7 @@ type DiscoveryConfig struct {
 type ScanConfig struct {
 	Interval          time.Duration `mapstructure:"interval"`
 	SampleValuesLimit int           `mapstructure:"sample_values_limit"`
+	Concurrency       int           `mapstructure:"concurrency"`
 }
 
 type StorageConfig struct {
@@ -47,12 +45,12 @@ type ServerConfig struct {
 }
 
 type LogConfig struct {
-	Level string `mapstructure:"level"` // debug, info, warn, error
+	Level string `mapstructure:"level"`
 }
 
 type GeminiConfig struct {
 	APIKey string `mapstructure:"api_key"`
-	Model  string `mapstructure:"model"` // default: gemini-1.5-flash
+	Model  string `mapstructure:"model"`
 }
 
 func Load(path string) (*Config, error) {
@@ -72,13 +70,17 @@ func Load(path string) (*Config, error) {
 	if err := v.ReadInConfig(); err != nil {
 		fmt.Println("Error reading config:", err)
 		fmt.Println("Building config from env")
-		return envConfig(v), nil
+		cfg := envConfig(v)
+		cfg.applyDefaults()
+		return cfg, nil
 	}
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
+
+	cfg.applyDefaults()
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -90,9 +92,7 @@ func Load(path string) (*Config, error) {
 func envConfig(v *viper.Viper) *Config {
 	return &Config{
 		Prometheus: PrometheusConfig{
-			URL:            v.GetString("prometheus_url"),
-			RateLimit:      v.GetFloat64("prometheus_rate_limit"),
-			RateLimitBurst: v.GetInt("prometheus_rate_limit_burst"),
+			URL: v.GetString("prometheus_url"),
 		},
 		Discovery: DiscoveryConfig{
 			ServiceLabel: v.GetString("discovery_service_label"),
@@ -100,6 +100,7 @@ func envConfig(v *viper.Viper) *Config {
 		Scan: ScanConfig{
 			Interval:          v.GetDuration("scan_interval"),
 			SampleValuesLimit: v.GetInt("scan_sample_values_limit"),
+			Concurrency:       v.GetInt("scan_concurrency"),
 		},
 		Storage: StorageConfig{
 			Path:          v.GetString("storage_path"),
@@ -116,6 +117,12 @@ func envConfig(v *viper.Viper) *Config {
 			APIKey: v.GetString("gemini_api_key"),
 			Model:  v.GetString("gemini_model"),
 		},
+	}
+}
+
+func (c *Config) applyDefaults() {
+	if c.Scan.Concurrency <= 0 {
+		c.Scan.Concurrency = 10
 	}
 }
 
@@ -147,12 +154,4 @@ func (c *Config) LogLevel() slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-func ConfigFileExists(path string) bool {
-	if path == "" {
-		path = "config.yaml"
-	}
-	_, err := os.Stat(path)
-	return err == nil
 }

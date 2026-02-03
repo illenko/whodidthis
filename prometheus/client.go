@@ -10,7 +10,6 @@ import (
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
-	"golang.org/x/time/rate"
 )
 
 type Client struct {
@@ -18,34 +17,15 @@ type Client struct {
 }
 
 type Config struct {
-	URL            string
-	Username       string
-	Password       string
-	Timeout        time.Duration
-	RateLimit      float64 // requests per second, 0 means no limit
-	RateLimitBurst int     // burst size for rate limiting
+	URL      string
+	Username string
+	Password string
+	Timeout  time.Duration
 }
 
 func NewClient(cfg Config) (*Client, error) {
-	// Set defaults for rate limiting
-	if cfg.RateLimit == 0 {
-		cfg.RateLimit = 100 // 100 requests per second by default
-	}
-	if cfg.RateLimitBurst == 0 {
-		cfg.RateLimitBurst = 20
-	}
+	var transport = http.DefaultTransport
 
-	// Build transport chain
-	var transport http.RoundTripper = http.DefaultTransport
-
-	// Add rate limiting
-	limiter := rate.NewLimiter(rate.Limit(cfg.RateLimit), cfg.RateLimitBurst)
-	transport = &rateLimitedTransport{
-		transport: transport,
-		limiter:   limiter,
-	}
-
-	// Add basic auth if configured
 	if cfg.Username != "" && cfg.Password != "" {
 		transport = &basicAuthTransport{
 			transport: transport,
@@ -77,14 +57,11 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-// ServiceInfo represents a discovered service with its series count
 type ServiceInfo struct {
 	Name        string
 	SeriesCount int
 }
 
-// DiscoverServices returns all unique service values for the configured label
-// Query: count({service_label}!="") by ({service_label})
 func (c *Client) DiscoverServices(ctx context.Context, serviceLabel string) ([]ServiceInfo, error) {
 	query := fmt.Sprintf(`count({%s!=""}) by (%s)`, serviceLabel, serviceLabel)
 
@@ -110,7 +87,6 @@ func (c *Client) DiscoverServices(ctx context.Context, serviceLabel string) ([]S
 		})
 	}
 
-	// Sort by series count descending
 	sort.Slice(services, func(i, j int) bool {
 		return services[i].SeriesCount > services[j].SeriesCount
 	})
@@ -118,14 +94,11 @@ func (c *Client) DiscoverServices(ctx context.Context, serviceLabel string) ([]S
 	return services, nil
 }
 
-// MetricInfo represents a metric with its series count
 type MetricInfo struct {
 	Name        string
 	SeriesCount int
 }
 
-// GetMetricsForService returns all metrics for a specific service
-// Query: count({service_label}="X") by (__name__)
 func (c *Client) GetMetricsForService(ctx context.Context, serviceLabel, serviceName string) ([]MetricInfo, error) {
 	query := fmt.Sprintf(`count({%s="%s"}) by (__name__)`, serviceLabel, serviceName)
 
@@ -151,7 +124,6 @@ func (c *Client) GetMetricsForService(ctx context.Context, serviceLabel, service
 		})
 	}
 
-	// Sort by series count descending
 	sort.Slice(metrics, func(i, j int) bool {
 		return metrics[i].SeriesCount > metrics[j].SeriesCount
 	})
@@ -159,16 +131,13 @@ func (c *Client) GetMetricsForService(ctx context.Context, serviceLabel, service
 	return metrics, nil
 }
 
-// LabelInfo represents a label with its unique value count and sample values
 type LabelInfo struct {
 	Name         string
 	UniqueValues int
 	SampleValues []string
 }
 
-// GetLabelsForMetric returns all label names and their cardinality for a metric within a service
 func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceName, metricName string, sampleLimit int) ([]LabelInfo, error) {
-	// Get all series for this metric in this service
 	selector := fmt.Sprintf(`%s{%s="%s"}`, metricName, serviceLabel, serviceName)
 
 	series, _, err := c.api.Series(ctx, []string{selector}, time.Time{}, time.Time{})
@@ -176,10 +145,8 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 		return nil, fmt.Errorf("failed to get labels for %s: %w", metricName, err)
 	}
 
-	// Collect unique values per label
 	labelValues := make(map[string]map[string]struct{})
 	for _, s := range series {
-		// Check for context cancellation in long-running loops
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -188,7 +155,6 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 
 		for label, value := range s {
 			labelName := string(label)
-			// Skip internal labels
 			if labelName == "__name__" || labelName == serviceLabel {
 				continue
 			}
@@ -199,10 +165,8 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 		}
 	}
 
-	// Build result with sample values
 	var labels []LabelInfo
 	for name, values := range labelValues {
-		// Extract sample values (up to limit)
 		var samples []string
 		for v := range values {
 			samples = append(samples, v)
@@ -210,7 +174,7 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 				break
 			}
 		}
-		// Sort samples for consistency
+
 		sort.Strings(samples)
 
 		labels = append(labels, LabelInfo{
@@ -220,24 +184,11 @@ func (c *Client) GetLabelsForMetric(ctx context.Context, serviceLabel, serviceNa
 		})
 	}
 
-	// Sort by unique values descending
 	sort.Slice(labels, func(i, j int) bool {
 		return labels[i].UniqueValues > labels[j].UniqueValues
 	})
 
 	return labels, nil
-}
-
-type rateLimitedTransport struct {
-	transport http.RoundTripper
-	limiter   *rate.Limiter
-}
-
-func (t *rateLimitedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := t.limiter.Wait(req.Context()); err != nil {
-		return nil, err
-	}
-	return t.transport.RoundTrip(req)
 }
 
 type basicAuthTransport struct {

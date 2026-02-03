@@ -29,7 +29,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Configure logger from config, DEBUG env var overrides
 	logLevel := cfg.LogLevel()
 	if os.Getenv("DEBUG") == "true" {
 		logLevel = slog.LevelDebug
@@ -49,11 +48,9 @@ func main() {
 	labelsRepo := storage.NewLabelsRepository(db)
 
 	promClient, err := prometheus.NewClient(prometheus.Config{
-		URL:            cfg.Prometheus.URL,
-		Username:       cfg.Prometheus.Username,
-		Password:       cfg.Prometheus.Password,
-		RateLimit:      cfg.Prometheus.RateLimit,
-		RateLimitBurst: cfg.Prometheus.RateLimitBurst,
+		URL:      cfg.Prometheus.URL,
+		Username: cfg.Prometheus.Username,
+		Password: cfg.Prometheus.Password,
 	})
 	if err != nil {
 		slog.Error("failed to create prometheus client", "error", err)
@@ -79,15 +76,20 @@ func main() {
 
 	var snapshotAnalyzer *analyzer.Analyzer
 	if cfg.Gemini.APIKey != "" {
-		geminiClient := analyzer.NewGeminiClient(cfg.Gemini.APIKey, cfg.Gemini.Model)
 		toolExecutor := analyzer.NewToolExecutor(servicesRepo, metricsRepo, labelsRepo)
-		snapshotAnalyzer = analyzer.New(analyzer.Config{
-			GeminiClient: geminiClient,
+		var err error
+		snapshotAnalyzer, err = analyzer.New(context.Background(), analyzer.Config{
+			APIKey:       cfg.Gemini.APIKey,
+			Model:        cfg.Gemini.Model,
 			ToolExecutor: toolExecutor,
 			AnalysisRepo: analysisRepo,
 			Snapshots:    snapshotsRepo,
 			Services:     servicesRepo,
 		})
+		if err != nil {
+			slog.Error("failed to create analyzer", "error", err)
+			os.Exit(1)
+		}
 		slog.Info("AI analysis enabled", "model", cfg.Gemini.Model)
 	} else {
 		slog.Warn("AI analysis disabled: WDT_GEMINI_API_KEY not set")

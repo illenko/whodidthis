@@ -23,15 +23,22 @@ type Scheduler struct {
 	logger    *slog.Logger
 }
 
+type ScanProgress struct {
+	Phase   string `json:"phase"`
+	Current int    `json:"current"`
+	Total   int    `json:"total"`
+	Detail  string `json:"detail"`
+}
+
 type ScanStatus struct {
-	Running       bool      `json:"running"`
-	Progress      string    `json:"progress,omitempty"`
-	LastScanAt    time.Time `json:"last_scan_at,omitempty"`
-	LastDuration  string    `json:"last_duration,omitempty"`
-	LastError     string    `json:"last_error,omitempty"`
-	NextScanAt    time.Time `json:"next_scan_at,omitempty"`
-	TotalServices int       `json:"total_services,omitempty"`
-	TotalSeries   int64     `json:"total_series,omitempty"`
+	Running       bool          `json:"running"`
+	Progress      *ScanProgress `json:"progress,omitempty"`
+	LastScanAt    time.Time     `json:"last_scan_at,omitempty"`
+	LastDuration  string        `json:"last_duration,omitempty"`
+	LastError     string        `json:"last_error,omitempty"`
+	NextScanAt    time.Time     `json:"next_scan_at,omitempty"`
+	TotalServices int           `json:"total_services,omitempty"`
+	TotalSeries   int64         `json:"total_series,omitempty"`
 }
 
 type Config struct {
@@ -98,7 +105,7 @@ func (s *Scheduler) TriggerScan(_ context.Context) error {
 	}
 	s.status.Running = true
 	s.status.LastError = ""
-	s.status.Progress = "Starting..."
+	s.status.Progress = &ScanProgress{Phase: "starting"}
 	s.mu.Unlock()
 
 	go s.runScanAlreadyLocked(context.Background())
@@ -119,7 +126,7 @@ func (s *Scheduler) runScan(ctx context.Context) {
 	}
 	s.status.Running = true
 	s.status.LastError = ""
-	s.status.Progress = "Starting..."
+	s.status.Progress = &ScanProgress{Phase: "starting"}
 	s.mu.Unlock()
 
 	s.doScan(ctx)
@@ -140,7 +147,7 @@ func (s *Scheduler) doScan(ctx context.Context) {
 	defer func() {
 		s.mu.Lock()
 		s.status.Running = false
-		s.status.Progress = ""
+		s.status.Progress = nil
 		s.status.LastScanAt = start
 		s.status.LastDuration = time.Since(start).String()
 		if scanErr != nil {
@@ -152,12 +159,13 @@ func (s *Scheduler) doScan(ctx context.Context) {
 	// Progress callback
 	progress := func(phase string, current, total int, detail string) {
 		s.mu.Lock()
-		if total > 0 {
-			s.status.Progress = detail
-		} else {
-			s.status.Progress = phase
+		defer s.mu.Unlock()
+		s.status.Progress = &ScanProgress{
+			Phase:   phase,
+			Current: current,
+			Total:   total,
+			Detail:  detail,
 		}
-		s.mu.Unlock()
 	}
 
 	// Run collection

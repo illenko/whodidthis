@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../api'
-import type { Scan, Service, ScanStatus } from '../api'
+import type { Scan, Service, ScanStatus, ScanProgress } from '../api'
 import { navigate } from '../lib/router'
 import { formatNumber, formatDate } from '../lib/format'
 import { useDebounce } from '../hooks/useDebounce'
@@ -136,6 +136,29 @@ export function ScansPage({ scanStatus, onScan }: ScansPageProps) {
   )
 }
 
+function formatScanProgress(progress: ScanProgress | null): string {
+  if (!progress || !progress.phase) {
+    return 'Initializing scan...'
+  }
+
+  switch (progress.phase) {
+    case 'discovering':
+      return 'Discovering services...'
+    case 'processing_service':
+      return `Scanning: ${progress.detail} (${progress.current} of ${progress.total} done)`
+    case 'collecting_labels':
+      return `[${progress.detail}] Collecting labels for ${progress.current} metrics...`
+    case 'service_complete':
+      if (progress.current === progress.total) {
+        return `Scan complete! Finalizing...`
+      }
+      return `Completed: ${progress.detail} (${progress.current} of ${progress.total} done)`
+    default:
+      const phase = progress.phase.replace(/_/g, ' ')
+      return `${phase.charAt(0).toUpperCase() + phase.slice(1)}...`
+  }
+}
+
 function ScanStatusBanner({ status, onScan }: { status: ScanStatus | null; onScan: () => void }) {
   if (!status) return null
 
@@ -147,7 +170,9 @@ function ScanStatusBanner({ status, onScan }: { status: ScanStatus | null; onSca
             <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-pulse" aria-hidden="true" />
             <div>
               <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Scan in progress</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400" aria-live="polite">{status.progress || 'Scanning...'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400" aria-live="polite">
+                {formatScanProgress(status.progress)}
+              </div>
             </div>
           </div>
         </div>

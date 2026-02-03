@@ -50,6 +50,33 @@ export interface HealthStatus {
   last_scan: string
 }
 
+export type AnalysisStatusType = 'pending' | 'running' | 'completed' | 'failed'
+
+export interface ToolCall {
+  name: string
+  args: Record<string, unknown>
+  result?: unknown
+}
+
+export interface SnapshotAnalysis {
+  id: number
+  current_snapshot_id: number
+  previous_snapshot_id: number
+  status: AnalysisStatusType
+  result?: string
+  tool_calls?: ToolCall[]
+  error?: string
+  created_at: string
+  completed_at?: string
+}
+
+export interface AnalysisGlobalStatus {
+  running: boolean
+  current_snapshot_id?: number
+  previous_snapshot_id?: number
+  progress?: string
+}
+
 async function fetchJSON<T>(url: string): Promise<T> {
   const res = await fetch(url)
   if (!res.ok) {
@@ -112,4 +139,27 @@ export const api = {
     fetchJSON<Label[]>(
       `${API_BASE_URL}/scans/${scanId}/services/${encodeURIComponent(serviceName)}/metrics/${encodeURIComponent(metricName)}/labels`
     ),
+
+  // Analysis
+  startAnalysis: (currentSnapshotId: number, previousSnapshotId: number) =>
+    fetch(`${API_BASE_URL}/analysis`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_snapshot_id: currentSnapshotId, previous_snapshot_id: previousSnapshotId }),
+    }).then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+      return res.json() as Promise<SnapshotAnalysis>
+    }),
+
+  getAnalysis: (currentId: number, previousId: number) =>
+    fetchJSONOrNull<SnapshotAnalysis>(`${API_BASE_URL}/analysis?current=${currentId}&previous=${previousId}`),
+
+  getAnalysisStatus: () =>
+    fetchJSON<AnalysisGlobalStatus>(`${API_BASE_URL}/analysis/status`),
+
+  deleteAnalysis: (currentId: number, previousId: number) =>
+    fetch(`${API_BASE_URL}/analysis?current=${currentId}&previous=${previousId}`, { method: 'DELETE' }),
+
+  listAnalysesBySnapshot: (scanId: number) =>
+    fetchJSON<SnapshotAnalysis[]>(`${API_BASE_URL}/scans/${scanId}/analyses`),
 }

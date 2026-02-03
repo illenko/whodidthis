@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/illenko/whodidthis/analyzer"
 	"github.com/illenko/whodidthis/api"
 	"github.com/illenko/whodidthis/collector"
 	"github.com/illenko/whodidthis/config"
@@ -74,6 +75,24 @@ func main() {
 		DB:        db,
 	})
 
+	analysisRepo := storage.NewAnalysisRepository(db)
+
+	var snapshotAnalyzer *analyzer.Analyzer
+	if cfg.Gemini.APIKey != "" {
+		geminiClient := analyzer.NewGeminiClient(cfg.Gemini.APIKey, cfg.Gemini.Model)
+		toolExecutor := analyzer.NewToolExecutor(servicesRepo, metricsRepo, labelsRepo)
+		snapshotAnalyzer = analyzer.New(analyzer.Config{
+			GeminiClient: geminiClient,
+			ToolExecutor: toolExecutor,
+			AnalysisRepo: analysisRepo,
+			Snapshots:    snapshotsRepo,
+			Services:     servicesRepo,
+		})
+		slog.Info("AI analysis enabled", "model", cfg.Gemini.Model)
+	} else {
+		slog.Warn("AI analysis disabled: WDT_GEMINI_API_KEY not set")
+	}
+
 	handlers := api.NewHandlers(api.HandlersConfig{
 		Snapshots:  snapshotsRepo,
 		Services:   servicesRepo,
@@ -82,6 +101,7 @@ func main() {
 		Scheduler:  sched,
 		DB:         db,
 		PromClient: promClient,
+		Analyzer:   snapshotAnalyzer,
 	})
 
 	server := api.NewServer(handlers, api.ServerConfig{

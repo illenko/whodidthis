@@ -54,6 +54,13 @@ func NewServer(handlers *Handlers, cfg ServerConfig) *Server {
 	// Labels (within a metric)
 	mux.HandleFunc("GET /api/scans/{id}/services/{service}/metrics/{metric}/labels", handlers.ListLabels)
 
+	// Analysis
+	mux.HandleFunc("POST /api/analysis", handlers.StartAnalysis)
+	mux.HandleFunc("GET /api/analysis", handlers.GetAnalysis)
+	mux.HandleFunc("DELETE /api/analysis", handlers.DeleteAnalysis)
+	mux.HandleFunc("GET /api/analysis/status", handlers.GetAnalysisStatus)
+	mux.HandleFunc("GET /api/scans/{id}/analyses", handlers.ListAnalysesBySnapshot)
+
 	// Static files (frontend)
 	mux.Handle("/", staticHandler())
 
@@ -108,7 +115,7 @@ func withMiddleware(next http.Handler) http.Handler {
 
 		// CORS
 		sw.Header().Set("Access-Control-Allow-Origin", "*")
-		sw.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		sw.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		sw.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {

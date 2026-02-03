@@ -53,3 +53,37 @@ type HealthStatus struct {
 	DatabaseOK          bool      `json:"database_ok"`
 	LastScan            time.Time `json:"last_scan,omitempty"`
 }
+
+type AnalysisStatus string
+
+const (
+	AnalysisStatusPending   AnalysisStatus = "pending"
+	AnalysisStatusRunning   AnalysisStatus = "running"
+	AnalysisStatusCompleted AnalysisStatus = "completed"
+	AnalysisStatusFailed    AnalysisStatus = "failed"
+)
+
+type SnapshotAnalysis struct {
+	ID                 int64          `json:"id"`
+	CurrentSnapshotID  int64          `json:"current_snapshot_id"`
+	PreviousSnapshotID int64          `json:"previous_snapshot_id"`
+	Status             AnalysisStatus `json:"status"`
+	Result             string         `json:"result,omitempty"`
+	ToolCalls          []ToolCall     `json:"tool_calls,omitempty"`
+	Error              string         `json:"error,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	CompletedAt        *time.Time     `json:"completed_at,omitempty"`
+}
+
+type ToolCall struct {
+	Name   string         `json:"name"`
+	Args   map[string]any `json:"args"`
+	Result any            `json:"result,omitempty"`
+}
+
+type AnalysisGlobalStatus struct {
+	Running            bool   `json:"running"`
+	CurrentSnapshotID  int64  `json:"current_snapshot_id,omitempty"`
+	PreviousSnapshotID int64  `json:"previous_snapshot_id,omitempty"`
+	Progress           string `json:"progress,omitempty"`
+}

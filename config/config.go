@@ -16,6 +16,7 @@ type Config struct {
 	Storage    StorageConfig    `mapstructure:"storage"`
 	Server     ServerConfig     `mapstructure:"server"`
 	Log        LogConfig        `mapstructure:"log"`
+	Gemini     GeminiConfig     `mapstructure:"gemini"`
 }
 
 type PrometheusConfig struct {
@@ -47,6 +48,11 @@ type ServerConfig struct {
 
 type LogConfig struct {
 	Level string `mapstructure:"level"` // debug, info, warn, error
+}
+
+type GeminiConfig struct {
+	APIKey string `mapstructure:"api_key"`
+	Model  string `mapstructure:"model"` // default: gemini-1.5-flash
 }
 
 func Load(path string) (*Config, error) {
@@ -105,6 +111,10 @@ func envConfig(v *viper.Viper) *Config {
 		},
 		Log: LogConfig{
 			Level: v.GetString("log_level"),
+		},
+		Gemini: GeminiConfig{
+			APIKey: v.GetString("gemini_api_key"),
+			Model:  v.GetString("gemini_model"),
 		},
 	}
 }

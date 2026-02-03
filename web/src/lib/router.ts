@@ -3,12 +3,20 @@ export type Route =
   | { page: 'services'; scanId: number }
   | { page: 'metrics'; scanId: number; serviceName: string }
   | { page: 'labels'; scanId: number; serviceName: string; metricName: string }
+  | { page: 'analysis'; currentId?: number; previousId?: number }
 
 export function parseRoute(): Route {
   const hash = window.location.hash.slice(1)
   if (!hash || hash === '/') return { page: 'scans' }
 
   const parts = hash.split('/').filter(Boolean)
+
+  if (parts[0] === 'analysis') {
+    const params = new URLSearchParams(hash.includes('?') ? hash.split('?')[1] : '')
+    const currentId = params.get('current') ? parseInt(params.get('current')!, 10) : undefined
+    const previousId = params.get('previous') ? parseInt(params.get('previous')!, 10) : undefined
+    return { page: 'analysis', currentId, previousId }
+  }
 
   if (parts[0] === 'scans' && parts.length >= 2) {
     const scanId = parseInt(parts[1], 10)
@@ -39,6 +47,12 @@ export function navigate(route: Route) {
     hash = `#/scans/${route.scanId}/services/${encodeURIComponent(route.serviceName)}`
   } else if (route.page === 'labels') {
     hash = `#/scans/${route.scanId}/services/${encodeURIComponent(route.serviceName)}/metrics/${encodeURIComponent(route.metricName)}`
+  } else if (route.page === 'analysis') {
+    const params = new URLSearchParams()
+    if (route.currentId) params.set('current', String(route.currentId))
+    if (route.previousId) params.set('previous', String(route.previousId))
+    const qs = params.toString()
+    hash = `#/analysis${qs ? '?' + qs : ''}`
   }
   window.location.hash = hash
 }

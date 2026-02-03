@@ -29,6 +29,13 @@ export function Header({ scanStatus, onScan }: HeaderProps) {
             </span>
           )}
           <button
+            onClick={() => navigate({ page: 'analysis' })}
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+            aria-label="AI Analysis"
+          >
+            AI Analysis
+          </button>
+          <button
             onClick={toggleTheme}
             className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600"
             aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}

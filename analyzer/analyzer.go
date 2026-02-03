@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/illenko/whodidthis/config"
 	"github.com/illenko/whodidthis/models"
 	"github.com/illenko/whodidthis/storage"
 	"google.golang.org/genai"
@@ -19,6 +20,7 @@ const defaultGeminiModel = "gemini-2.5-pro"
 type Analyzer struct {
 	client       *genai.Client
 	model        string
+	geminiConfig config.GeminiConfig
 	toolExecutor *ToolExecutor
 	analysisRepo *storage.AnalysisRepository
 	snapshots    *storage.SnapshotsRepository
@@ -33,8 +35,7 @@ type Analyzer struct {
 }
 
 type Config struct {
-	APIKey       string
-	Model        string
+	Gemini       config.GeminiConfig
 	ToolExecutor *ToolExecutor
 	AnalysisRepo *storage.AnalysisRepository
 	Snapshots    *storage.SnapshotsRepository
@@ -43,14 +44,14 @@ type Config struct {
 
 func New(ctx context.Context, cfg Config) (*Analyzer, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  cfg.APIKey,
+		APIKey:  cfg.Gemini.APIKey,
 		Backend: genai.BackendGeminiAPI,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create genai client: %w", err)
 	}
 
-	model := cfg.Model
+	model := cfg.Gemini.Model
 	if model == "" {
 		model = defaultGeminiModel
 	}
@@ -58,6 +59,7 @@ func New(ctx context.Context, cfg Config) (*Analyzer, error) {
 	return &Analyzer{
 		client:       client,
 		model:        model,
+		geminiConfig: cfg.Gemini,
 		toolExecutor: cfg.ToolExecutor,
 		analysisRepo: cfg.AnalysisRepo,
 		snapshots:    cfg.Snapshots,
@@ -117,17 +119,8 @@ func (a *Analyzer) StartAnalysis(ctx context.Context, currentID, previousID int6
 	return analysis, nil
 }
 
-func newChatConfig() *genai.GenerateContentConfig {
-	temp := float32(0.7)
-	return &genai.GenerateContentConfig{
-		Temperature:     &temp,
-		MaxOutputTokens: 4096,
-		Tools:           []*genai.Tool{getGenaiToolDefinitions()},
-	}
-}
-
 func (a *Analyzer) runAnalysis(analysis *models.SnapshotAnalysis, current, previous *models.Snapshot) {
-	ctx := context.Background() // Use background context for goroutine
+	ctx := context.Background()
 
 	defer func() {
 		a.mu.Lock()
@@ -159,7 +152,13 @@ func (a *Analyzer) runAnalysis(analysis *models.SnapshotAnalysis, current, previ
 
 	a.updateProgress("Calling Gemini API")
 
-	chatSession, err := a.client.Chats.Create(ctx, a.model, newChatConfig(), nil)
+	temp := a.geminiConfig.Chat.Temperature
+	genaiConfig := &genai.GenerateContentConfig{
+		Temperature:     &temp,
+		MaxOutputTokens: a.geminiConfig.Chat.MaxOutputTokens,
+		Tools:           []*genai.Tool{getGenaiToolDefinitions()},
+	}
+	chatSession, err := a.client.Chats.Create(ctx, a.model, genaiConfig, nil)
 	if err != nil {
 		a.logger.Error("failed to create chat session", "error", err)
 		a.completeAnalysisWithError(ctx, analysis, err)

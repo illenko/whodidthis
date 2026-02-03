@@ -48,9 +48,15 @@ type LogConfig struct {
 	Level string `mapstructure:"level"`
 }
 
+type ChatConfig struct {
+	Temperature     float32 `mapstructure:"temperature"`
+	MaxOutputTokens int32   `mapstructure:"max_output_tokens"`
+}
+
 type GeminiConfig struct {
-	APIKey string `mapstructure:"api_key"`
-	Model  string `mapstructure:"model"`
+	APIKey string     `mapstructure:"api_key"`
+	Model  string     `mapstructure:"model"`
+	Chat   ChatConfig `mapstructure:"chat"`
 }
 
 func Load(path string) (*Config, error) {
@@ -116,6 +122,10 @@ func envConfig(v *viper.Viper) *Config {
 		Gemini: GeminiConfig{
 			APIKey: v.GetString("gemini_api_key"),
 			Model:  v.GetString("gemini_model"),
+			Chat: ChatConfig{
+				Temperature:     float32(v.GetFloat64("gemini_chat_temperature")),
+				MaxOutputTokens: int32(v.GetInt("gemini_chat_max_output_tokens")),
+			},
 		},
 	}
 }
@@ -123,6 +133,12 @@ func envConfig(v *viper.Viper) *Config {
 func (c *Config) applyDefaults() {
 	if c.Scan.Concurrency <= 0 {
 		c.Scan.Concurrency = 10
+	}
+	if c.Gemini.Chat.Temperature <= 0 {
+		c.Gemini.Chat.Temperature = 0.7
+	}
+	if c.Gemini.Chat.MaxOutputTokens <= 0 {
+		c.Gemini.Chat.MaxOutputTokens = 16384
 	}
 }
 

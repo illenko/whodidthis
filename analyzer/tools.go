@@ -193,7 +193,6 @@ func (e *ToolExecutor) compareServices(ctx context.Context, args map[string]any)
 		}
 	}
 
-	// Get metrics from both snapshots
 	var currentMetrics, previousMetrics []models.MetricSnapshot
 	if currentService != nil {
 		currentMetrics, err = e.metrics.List(ctx, currentService.ID, storage.MetricListOptions{})
@@ -208,7 +207,6 @@ func (e *ToolExecutor) compareServices(ctx context.Context, args map[string]any)
 		}
 	}
 
-	// Build maps for comparison
 	currentMap := make(map[string]int)
 	for _, m := range currentMetrics {
 		currentMap[m.MetricName] = m.SeriesCount

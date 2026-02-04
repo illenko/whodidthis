@@ -1,6 +1,6 @@
 import { useState, useMemo, type ReactNode } from 'react'
 
-const PAGE_SIZE = 25
+const PAGE_SIZE = 15
 
 export interface Column<T> {
   key: string

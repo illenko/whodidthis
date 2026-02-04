@@ -10,6 +10,7 @@ import (
 
 	"github.com/illenko/whodidthis/analyzer"
 	"github.com/illenko/whodidthis/api"
+	"github.com/illenko/whodidthis/api/handler"
 	"github.com/illenko/whodidthis/collector"
 	"github.com/illenko/whodidthis/config"
 	"github.com/illenko/whodidthis/prometheus"
@@ -79,8 +80,7 @@ func main() {
 		toolExecutor := analyzer.NewToolExecutor(servicesRepo, metricsRepo, labelsRepo)
 		var err error
 		snapshotAnalyzer, err = analyzer.New(context.Background(), analyzer.Config{
-			APIKey:       cfg.Gemini.APIKey,
-			Model:        cfg.Gemini.Model,
+			Gemini:       cfg.Gemini,
 			ToolExecutor: toolExecutor,
 			AnalysisRepo: analysisRepo,
 			Snapshots:    snapshotsRepo,
@@ -95,21 +95,24 @@ func main() {
 		slog.Warn("AI analysis disabled: WDT_GEMINI_API_KEY not set")
 	}
 
-	handlers := api.NewHandlers(api.HandlersConfig{
-		Snapshots:  snapshotsRepo,
-		Services:   servicesRepo,
-		Metrics:    metricsRepo,
-		Labels:     labelsRepo,
-		Scheduler:  sched,
-		DB:         db,
-		PromClient: promClient,
-		Analyzer:   snapshotAnalyzer,
-	})
+	healthHandler := handler.NewHealthHandler(snapshotsRepo, db, promClient)
+	scansHandler := handler.NewScansHandler(snapshotsRepo, sched)
+	analysisHandler := handler.NewAnalysisHandler(snapshotAnalyzer)
+	servicesHandler := handler.NewServicesHandler(servicesRepo)
+	metricsHandler := handler.NewMetricsHandler(servicesRepo, metricsRepo)
+	labelsHandler := handler.NewLabelsHandler(servicesRepo, metricsRepo, labelsRepo)
 
-	server := api.NewServer(handlers, api.ServerConfig{
-		Host: cfg.Server.Host,
-		Port: cfg.Server.Port,
-	})
+	server := api.NewServer(
+		healthHandler,
+		scansHandler,
+		analysisHandler,
+		servicesHandler,
+		metricsHandler,
+		labelsHandler,
+		api.ServerConfig{
+			Host: cfg.Server.Host,
+			Port: cfg.Server.Port,
+		})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

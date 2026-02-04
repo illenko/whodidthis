@@ -132,10 +132,10 @@ func envConfig(v *viper.Viper) *Config {
 
 func (c *Config) applyDefaults() {
 	if c.Scan.Concurrency <= 0 {
-		c.Scan.Concurrency = 10
+		c.Scan.Concurrency = 5
 	}
 	if c.Gemini.Chat.Temperature <= 0 {
-		c.Gemini.Chat.Temperature = 0.7
+		c.Gemini.Chat.Temperature = 0.1
 	}
 	if c.Gemini.Chat.MaxOutputTokens <= 0 {
 		c.Gemini.Chat.MaxOutputTokens = 16384

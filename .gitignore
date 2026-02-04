@@ -45,3 +45,4 @@ web/dist/
 /whodidthis.db-wal
 /docker-compose.yml
 /Dockerfile
+/data/

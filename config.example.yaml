@@ -2,6 +2,7 @@ prometheus:
   url: http://localhost:8428
   # username: ""
   # password: ""
+  timeout: 30s
 
 discovery:
   service_label: job  # Label used to identify services (e.g., "app", "service", "job")
@@ -9,7 +10,7 @@ discovery:
 scan:
   interval: 1m
   sample_values_limit: 10  # Max sample values to store per label
-  concurrency: 10          # Max concurrent HTTP requests during scan (default: 10)
+  concurrency: 5            # Max concurrent HTTP requests during scan
 
 storage:
   path: whodidthis.db
@@ -21,3 +22,11 @@ server:
 
 log:
   level: info  # debug, info, warn, error
+
+gemini:
+  api_key: ""       # Or set WDT_GEMINI_API_KEY env var
+  model: ""
+  timeout: 2m
+  chat:
+    temperature: 0.1
+    max_output_tokens: 16384

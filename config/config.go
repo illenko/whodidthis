@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -19,9 +20,10 @@ type Config struct {
 }
 
 type PrometheusConfig struct {
-	URL      string `mapstructure:"url"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
+	URL      string        `mapstructure:"url"`
+	Username string        `mapstructure:"username"`
+	Password string        `mapstructure:"password"`
+	Timeout  time.Duration `mapstructure:"timeout"`
 }
 
 type DiscoveryConfig struct {
@@ -54,9 +56,10 @@ type ChatConfig struct {
 }
 
 type GeminiConfig struct {
-	APIKey string     `mapstructure:"api_key"`
-	Model  string     `mapstructure:"model"`
-	Chat   ChatConfig `mapstructure:"chat"`
+	APIKey  string        `mapstructure:"api_key"`
+	Model   string        `mapstructure:"model"`
+	Timeout time.Duration `mapstructure:"timeout"`
+	Chat    ChatConfig    `mapstructure:"chat"`
 }
 
 func Load(path string) (*Config, error) {
@@ -71,14 +74,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	v.SetEnvPrefix("WDT")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	if err := v.ReadInConfig(); err != nil {
-		fmt.Println("Error reading config:", err)
-		fmt.Println("Building config from env")
-		cfg := envConfig(v)
-		cfg.applyDefaults()
-		return cfg, nil
+		slog.Warn("no config file found, using env vars and defaults", "error", err)
 	}
 
 	var cfg Config
@@ -95,44 +95,15 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func envConfig(v *viper.Viper) *Config {
-	return &Config{
-		Prometheus: PrometheusConfig{
-			URL: v.GetString("prometheus_url"),
-		},
-		Discovery: DiscoveryConfig{
-			ServiceLabel: v.GetString("discovery_service_label"),
-		},
-		Scan: ScanConfig{
-			Interval:          v.GetDuration("scan_interval"),
-			SampleValuesLimit: v.GetInt("scan_sample_values_limit"),
-			Concurrency:       v.GetInt("scan_concurrency"),
-		},
-		Storage: StorageConfig{
-			Path:          v.GetString("storage_path"),
-			RetentionDays: v.GetInt("storage_retention_days"),
-		},
-		Server: ServerConfig{
-			Port: v.GetInt("server_port"),
-			Host: v.GetString("server_host"),
-		},
-		Log: LogConfig{
-			Level: v.GetString("log_level"),
-		},
-		Gemini: GeminiConfig{
-			APIKey: v.GetString("gemini_api_key"),
-			Model:  v.GetString("gemini_model"),
-			Chat: ChatConfig{
-				Temperature:     float32(v.GetFloat64("gemini_chat_temperature")),
-				MaxOutputTokens: int32(v.GetInt("gemini_chat_max_output_tokens")),
-			},
-		},
-	}
-}
-
 func (c *Config) applyDefaults() {
 	if c.Scan.Concurrency <= 0 {
 		c.Scan.Concurrency = 5
+	}
+	if c.Prometheus.Timeout <= 0 {
+		c.Prometheus.Timeout = 30 * time.Second
+	}
+	if c.Gemini.Timeout <= 0 {
+		c.Gemini.Timeout = 2 * time.Minute
 	}
 	if c.Gemini.Chat.Temperature <= 0 {
 		c.Gemini.Chat.Temperature = 0.1

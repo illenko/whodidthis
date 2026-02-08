@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -18,7 +19,20 @@ import (
 	"github.com/illenko/whodidthis/storage"
 )
 
+var (
+	version   = "dev"
+	commit    = "none"
+	buildTime = "unknown"
+)
+
 func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal error", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "config.yaml"
@@ -26,22 +40,21 @@ func main() {
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		slog.Error("failed to load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("load config: %w", err)
 	}
 
-	logLevel := cfg.LogLevel()
-	if os.Getenv("DEBUG") == "true" {
-		logLevel = slog.LevelDebug
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel})))
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel()})))
+	slog.Info("starting whodidthis", "version", version, "commit", commit, "built", buildTime)
 
 	db, err := storage.New(cfg.Storage.Path)
 	if err != nil {
-		slog.Error("failed to initialize database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("init database: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Error("failed to close database", "error", err)
+		}
+	}()
 
 	snapshotsRepo := storage.NewSnapshotsRepository(db)
 	servicesRepo := storage.NewServicesRepository(db)
@@ -54,8 +67,7 @@ func main() {
 		Password: cfg.Prometheus.Password,
 	})
 	if err != nil {
-		slog.Error("failed to create prometheus client", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("create prometheus client: %w", err)
 	}
 
 	coll := collector.NewCollector(
@@ -78,7 +90,6 @@ func main() {
 	var snapshotAnalyzer *analyzer.Analyzer
 	if cfg.Gemini.APIKey != "" {
 		toolExecutor := analyzer.NewToolExecutor(servicesRepo, metricsRepo, labelsRepo)
-		var err error
 		snapshotAnalyzer, err = analyzer.New(context.Background(), analyzer.Config{
 			Gemini:       cfg.Gemini,
 			ToolExecutor: toolExecutor,
@@ -87,8 +98,7 @@ func main() {
 			Services:     servicesRepo,
 		})
 		if err != nil {
-			slog.Error("failed to create analyzer", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("create analyzer: %w", err)
 		}
 		slog.Info("AI analysis enabled", "model", cfg.Gemini.Model)
 	} else {
@@ -135,8 +145,5 @@ func main() {
 		}
 	}()
 
-	if err := server.Start(); err != nil {
-		slog.Error("server error", "error", err)
-		os.Exit(1)
-	}
+	return server.Start()
 }

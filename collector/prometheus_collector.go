@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,8 @@ import (
 	"github.com/illenko/whodidthis/prometheus"
 	"github.com/illenko/whodidthis/storage"
 )
+
+const perServiceTimeout = 2 * time.Minute
 
 type Collector struct {
 	client       prometheus.MetricsClient
@@ -51,6 +54,7 @@ type CollectResult struct {
 	TotalServices int
 	TotalSeries   int64
 	Duration      time.Duration
+	ServiceErrors int
 }
 
 type ProgressCallback func(phase string, current, total int, detail string)
@@ -84,6 +88,7 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 	logger.Info("discovered services", "count", len(serviceInfos))
 
 	var totalSeries atomic.Int64
+	var serviceErrors atomic.Int64
 
 	sem := make(chan struct{}, c.concurrency)
 	var wg sync.WaitGroup
@@ -99,11 +104,16 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 		go func(svc prometheus.ServiceInfo) {
 			defer wg.Done()
 
+			// Acquire sem for the initial HTTP call only — released inside collectService
+			// before spawning metric goroutines, so they can reuse the same sem pool.
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
 				return
 			}
+
+			svcCtx, svcCancel := context.WithTimeout(ctx, perServiceTimeout)
+			defer svcCancel()
 
 			logger.Debug("scanning service", "name", svc.Name)
 
@@ -111,8 +121,7 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 			progress("processing_service", completed, len(serviceInfos), svc.Name)
 			mu.Unlock()
 
-			// collectService always releases the sem slot internally
-			serviceSnapshot, err := c.collectService(ctx, snapshotID, svc, sem, progress)
+			serviceSnapshot, err := c.collectService(svcCtx, snapshotID, svc, sem)
 
 			mu.Lock()
 			completed++
@@ -120,6 +129,7 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 			mu.Unlock()
 
 			if err != nil {
+				serviceErrors.Add(1)
 				logger.Error("failed to collect service", "name", svc.Name, "error", err)
 				return
 			}
@@ -140,9 +150,12 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 	}
 
 	duration := time.Since(start)
+	svcErrors := int(serviceErrors.Load())
+
 	logger.Info("collection complete",
 		"services", len(serviceInfos),
 		"total_series", finalTotalSeries,
+		"service_errors", svcErrors,
 		"duration", duration,
 	)
 
@@ -151,14 +164,16 @@ func (c *Collector) Collect(ctx context.Context, scanID int64, progress Progress
 		TotalServices: len(serviceInfos),
 		TotalSeries:   finalTotalSeries,
 		Duration:      duration,
+		ServiceErrors: svcErrors,
 	}, nil
 }
 
-func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc prometheus.ServiceInfo, sem chan struct{}, progress ProgressCallback) (*models.ServiceSnapshot, error) {
+func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc prometheus.ServiceInfo, sem chan struct{}) (*models.ServiceSnapshot, error) {
 	metricInfos, err := c.client.GetMetricsForService(ctx, c.serviceLabel, svc.Name)
+	// Release the service-level sem slot so metric goroutines can use the pool.
+	<-sem
 	if err != nil {
-		<-sem
-		return nil, err
+		return nil, fmt.Errorf("get metrics for %s: %w", svc.Name, err)
 	}
 
 	c.logger.Debug("found metrics for service",
@@ -166,8 +181,6 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 		"metrics", len(metricInfos),
 		"series", svc.SeriesCount,
 	)
-
-	progress("collecting_labels", len(metricInfos), int(svc.SeriesCount), svc.Name)
 
 	serviceSnapshot := &models.ServiceSnapshot{
 		SnapshotID:  snapshotID,
@@ -178,12 +191,9 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 
 	serviceSnapshotID, err := c.services.Create(ctx, serviceSnapshot)
 	if err != nil {
-		<-sem
-		return nil, err
+		return nil, fmt.Errorf("create service snapshot %s: %w", svc.Name, err)
 	}
 	serviceSnapshot.ID = serviceSnapshotID
-
-	<-sem
 
 	var metricWg sync.WaitGroup
 	for _, metric := range metricInfos {
@@ -197,10 +207,10 @@ func (c *Collector) collectService(ctx context.Context, snapshotID int64, svc pr
 
 			select {
 			case sem <- struct{}{}:
+				defer func() { <-sem }()
 			case <-ctx.Done():
 				return
 			}
-			defer func() { <-sem }()
 
 			c.logger.Debug("collecting metric",
 				"service", svc.Name,

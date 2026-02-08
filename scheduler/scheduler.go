@@ -17,10 +17,13 @@ type Scheduler struct {
 	interval  time.Duration
 	retention time.Duration
 	stopCh    chan struct{}
+	stopOnce  sync.Once
 	status    *ScanStatus
 	mu        sync.RWMutex
 	scanIDSeq atomic.Int64
 	logger    *slog.Logger
+	parentCtx context.Context // set by Start, used for triggered scans
+	scanWg    sync.WaitGroup  // tracks async triggered scans
 }
 
 type ScanProgress struct {
@@ -67,10 +70,11 @@ func New(collector *collector.Collector, cfg Config) *Scheduler {
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	slog.Info("starting scheduler", "interval", s.interval)
+	s.parentCtx = ctx
+	s.logger.Info("starting scheduler", "interval", s.interval)
 
 	// Run initial scan
-	s.runScan(ctx)
+	s.executeScan(ctx)
 
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -82,22 +86,26 @@ func (s *Scheduler) Start(ctx context.Context) {
 
 		select {
 		case <-ctx.Done():
-			slog.Info("scheduler stopped")
+			s.scanWg.Wait()
+			s.logger.Info("scheduler stopped")
 			return
 		case <-s.stopCh:
-			slog.Info("scheduler stopped")
+			s.scanWg.Wait()
+			s.logger.Info("scheduler stopped")
 			return
 		case <-ticker.C:
-			s.runScan(ctx)
+			s.executeScan(ctx)
 		}
 	}
 }
 
 func (s *Scheduler) Stop() {
-	close(s.stopCh)
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+	})
 }
 
-func (s *Scheduler) TriggerScan(_ context.Context) error {
+func (s *Scheduler) TriggerScan() error {
 	s.mu.Lock()
 	if s.status.Running {
 		s.mu.Unlock()
@@ -106,9 +114,18 @@ func (s *Scheduler) TriggerScan(_ context.Context) error {
 	s.status.Running = true
 	s.status.LastError = ""
 	s.status.Progress = &ScanProgress{Phase: "starting"}
+	ctx := s.parentCtx
 	s.mu.Unlock()
 
-	go s.runScanAlreadyLocked(context.Background())
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.scanWg.Add(1)
+	go func() {
+		defer s.scanWg.Done()
+		s.doScan(ctx)
+	}()
 	return nil
 }
 
@@ -118,7 +135,8 @@ func (s *Scheduler) GetStatus() ScanStatus {
 	return *s.status
 }
 
-func (s *Scheduler) runScan(ctx context.Context) {
+// executeScan acquires the running lock and runs a scan synchronously.
+func (s *Scheduler) executeScan(ctx context.Context) {
 	s.mu.Lock()
 	if s.status.Running {
 		s.mu.Unlock()
@@ -132,10 +150,7 @@ func (s *Scheduler) runScan(ctx context.Context) {
 	s.doScan(ctx)
 }
 
-func (s *Scheduler) runScanAlreadyLocked(ctx context.Context) {
-	s.doScan(ctx)
-}
-
+// doScan runs the actual scan. Caller must have already set status.Running = true.
 func (s *Scheduler) doScan(ctx context.Context) {
 	scanID := s.scanIDSeq.Add(1)
 	start := time.Now()
@@ -143,7 +158,9 @@ func (s *Scheduler) doScan(ctx context.Context) {
 	logger := s.logger.With("scan_id", scanID)
 	logger.Info("starting scan")
 
+	var result *collector.CollectResult
 	var scanErr error
+
 	defer func() {
 		s.mu.Lock()
 		s.status.Running = false
@@ -152,11 +169,13 @@ func (s *Scheduler) doScan(ctx context.Context) {
 		s.status.LastDuration = time.Since(start).String()
 		if scanErr != nil {
 			s.status.LastError = scanErr.Error()
+		} else if result != nil {
+			s.status.TotalServices = result.TotalServices
+			s.status.TotalSeries = result.TotalSeries
 		}
 		s.mu.Unlock()
 	}()
 
-	// Progress callback
 	progress := func(phase string, current, total int, detail string) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -168,18 +187,11 @@ func (s *Scheduler) doScan(ctx context.Context) {
 		}
 	}
 
-	// Run collection
-	result, err := s.collector.Collect(ctx, scanID, progress)
-	if err != nil {
-		logger.Error("collection failed", "error", err)
-		scanErr = err
+	result, scanErr = s.collector.Collect(ctx, scanID, progress)
+	if scanErr != nil {
+		logger.Error("collection failed", "error", scanErr)
 		return
 	}
-
-	s.mu.Lock()
-	s.status.TotalServices = result.TotalServices
-	s.status.TotalSeries = result.TotalSeries
-	s.mu.Unlock()
 
 	logger.Info("scan complete",
 		"services", result.TotalServices,
@@ -187,7 +199,6 @@ func (s *Scheduler) doScan(ctx context.Context) {
 		"duration", time.Since(start),
 	)
 
-	// Run cleanup after successful scan
 	s.runCleanup(ctx, scanID)
 }
 

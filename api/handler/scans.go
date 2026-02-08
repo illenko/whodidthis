@@ -85,7 +85,7 @@ func (s *ScansHandler) Trigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.scheduler.TriggerScan(r.Context())
+	err := s.scheduler.TriggerScan()
 	if err != nil {
 		if err == scheduler.ErrScanAlreadyRunning {
 			writeError(w, http.StatusConflict, err.Error())
